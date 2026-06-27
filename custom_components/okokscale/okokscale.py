@@ -13,6 +13,16 @@ from bluetooth_sensor_state_data import BluetoothData
 from home_assistant_bluetooth import BluetoothServiceInfo
 from sensor_state_data import SensorDeviceClass, SensorLibrary, SensorUpdate, Units
 
+from .parser import (
+    MASS_UNIT_KILOGRAMS,
+    MASS_UNIT_POUNDS,
+    ScaleReading,
+    decode_maxxmee_c0_raw_value,
+    decode_vc0_payload,
+    is_c0_manufacturer_id,
+    maxxmee_c0_raw_from_manufacturer_data,
+)
+
 UPDATE_INTERVAL_SECONDS = 60 * 60 * 24  # 1 day
 
 _LOGGER = logging.getLogger(__name__)
@@ -42,7 +52,6 @@ MANUFACTURER_DATA_ID_V10 = 0x10FF  # 16-bit little endian "header" 0xff 0x10
 MANUFACTURER_DATA_ID_V11 = 0x11CA  # 16-bit little endian "header" 0xca 0x11
 MANUFACTURER_DATA_ID_V20 = 0x20CA  # 16-bit little endian "header" 0xca 0x20
 MANUFACTURER_DATA_ID_V26 = 0x26C0  # 16-bit little endian "header" 0xc0 0x26
-MANUFACTURER_DATA_ID_VC0 = 0xC0  # 8-bit little endian "header" 0xc0
 MANUFACTURER_DATA_ID_VF0 = 0xF0FF  # 16-bit little endian "header" 0xff 0xf0
 
 IDX_V10_WEIGHT_MSB = 3
@@ -64,11 +73,6 @@ IDX_V20_CHECKSUM = 12
 IDX_V26_WEIGHT_MSB = 3
 IDX_V26_WEIGHT_LSB = 2
 
-IDX_VC0_FINAL = 6
-IDX_VC0_WEIGHT_MSB = 0
-IDX_VC0_WEIGHT_LSB = 1
-IDX_VC0_BODY_PROPERTIES = 6
-
 IDX_VF0_WEIGHT_MSB = 3
 IDX_VF0_WEIGHT_LSB = 2
 
@@ -89,17 +93,7 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
         if _LOGGER.isEnabledFor(logging.DEBUG):
             self.log_service_info(service_info)
 
-        manufacturer_data_key_lsbs = [
-            key & 0xFF for key in service_info.manufacturer_data
-        ]
-        if not (
-            MANUFACTURER_DATA_ID_V10 in service_info.manufacturer_data
-            or MANUFACTURER_DATA_ID_V11 in service_info.manufacturer_data
-            or MANUFACTURER_DATA_ID_V20 in service_info.manufacturer_data
-            or MANUFACTURER_DATA_ID_V26 in service_info.manufacturer_data
-            or MANUFACTURER_DATA_ID_VF0 in service_info.manufacturer_data
-            or MANUFACTURER_DATA_ID_VC0 in manufacturer_data_key_lsbs
-        ):
+        if not self._has_supported_manufacturer_data(service_info.manufacturer_data):
             _LOGGER.info(
                 "Manufacturer data not found for %s; ids=%s",
                 service_info.address,
@@ -118,6 +112,30 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
         self.process_manufacturer_data(service_info.manufacturer_data)
 
         self.update_signal_strength(service_info.rssi)
+
+    def _has_supported_manufacturer_data(self, manufacturer_data) -> bool:
+        """Return true if the advertisement contains a supported packet."""
+        if (
+            MANUFACTURER_DATA_ID_V10 in manufacturer_data
+            or MANUFACTURER_DATA_ID_V11 in manufacturer_data
+            or MANUFACTURER_DATA_ID_V20 in manufacturer_data
+            or MANUFACTURER_DATA_ID_V26 in manufacturer_data
+            or MANUFACTURER_DATA_ID_VF0 in manufacturer_data
+        ):
+            return True
+
+        for manufacturer_id, payload in manufacturer_data.items():
+            if not is_c0_manufacturer_id(manufacturer_id):
+                continue
+            raw_value = maxxmee_c0_raw_from_manufacturer_data(
+                manufacturer_id, payload
+            )
+            if raw_value is not None and decode_maxxmee_c0_raw_value(raw_value):
+                return True
+            if decode_vc0_payload(payload):
+                return True
+
+        return False
 
     def poll_needed(
         self, service_info: BluetoothServiceInfo, last_poll: float | None
@@ -353,48 +371,83 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
         self.update_predefined_sensor(SensorLibrary.IMPEDANCE__OHM, impedance)
 
     def _process_manufacturer_data_vc0(self, manufacturer_data):
-        data = None
-        final = False
+        reading = None
+        reading_key = None
         for key, _data in manufacturer_data.items():
             # Run through the whole list of values so we get the final reading
-            if (key & 0xFF) != MANUFACTURER_DATA_ID_VC0:
-                continue
-            if len(_data) != 13:
-                continue
-            if _data[IDX_VC0_WEIGHT_MSB] == 0 and _data[IDX_VC0_WEIGHT_LSB] == 0:
+            if not is_c0_manufacturer_id(key):
                 continue
 
-            if (_data[IDX_VC0_FINAL] & 1) == 1:
-                data = _data
-                final = True
-            elif not final:
-                data = _data
+            raw_value = maxxmee_c0_raw_from_manufacturer_data(key, _data)
+            maxxmee_reading = (
+                decode_maxxmee_c0_raw_value(raw_value)
+                if raw_value is not None
+                else None
+            )
+            if maxxmee_reading is not None:
+                if not maxxmee_reading.final:
+                    _LOGGER.debug(
+                        "Ignoring unstable MAXXMEE C0 data for %s; "
+                        "status=0x%02x raw=0x%s",
+                        hex(key),
+                        maxxmee_reading.status,
+                        raw_value.hex(),
+                    )
+                    continue
 
-        if data is None:
+                _LOGGER.debug(
+                    "Parsed stable MAXXMEE C0 data for %s; "
+                    "weight=%.2f kg status=0x%02x raw=0x%s",
+                    hex(key),
+                    maxxmee_reading.weight,
+                    maxxmee_reading.status,
+                    raw_value.hex(),
+                )
+                self._update_mass_sensor(maxxmee_reading)
+                return
+
+            vc0_reading = decode_vc0_payload(_data)
+            if vc0_reading is None:
+                _LOGGER.debug(
+                    "Ignoring unsupported VC0 data for %s; length=%d data=0x%s",
+                    hex(key),
+                    len(_data),
+                    _data.hex(),
+                )
+                continue
+
+            if vc0_reading.final:
+                reading = vc0_reading
+                reading_key = key
+            elif reading is None:
+                reading = vc0_reading
+                reading_key = key
+
+        if reading is None:
             return
 
-        if not final:
-            _LOGGER.debug("Data is not final")
-            # return
+        if not reading.final:
+            _LOGGER.debug("VC0 data for %s is not final", hex(reading_key))
 
-        msb = data[IDX_VC0_WEIGHT_MSB]
-        lsb = data[IDX_VC0_WEIGHT_LSB]
-        base_description = None
-        match data[IDX_VC0_BODY_PROPERTIES] >> 3 & 0x3:
-            case 0:  # kg
-                weight = (msb << 8 | lsb) / 100.0
-                base_description = SensorLibrary.MASS__MASS_KILOGRAMS
-            case 2:  # lb
-                weight = (msb << 8 | lsb) / 10.0
-                base_description = SensorLibrary.MASS__MASS_POUNDS
-            case 3:  # st:lb
-                weight = msb * 14 + lsb / 10.0
-                base_description = SensorLibrary.MASS__MASS_POUNDS
+        self._update_mass_sensor(reading)
+
+    def _update_mass_sensor(self, reading: ScaleReading) -> None:
+        """Update the mass sensor from a decoded reading."""
+        if reading.unit == MASS_UNIT_KILOGRAMS:
+            base_description = SensorLibrary.MASS__MASS_KILOGRAMS
+        elif reading.unit == MASS_UNIT_POUNDS:
+            base_description = SensorLibrary.MASS__MASS_POUNDS
+        else:
+            _LOGGER.debug("Ignoring unsupported mass unit: %s", reading.unit)
+            return
+
         _LOGGER.debug(
-            "Weight: %.2f %s", weight, base_description.native_unit_of_measurement
+            "Weight: %.2f %s",
+            reading.weight,
+            base_description.native_unit_of_measurement,
         )
 
-        self.update_predefined_sensor(base_description, weight)
+        self.update_predefined_sensor(base_description, reading.weight)
 
     def _process_manufacturer_data_vf0(self, manufacturer_data):
         data = manufacturer_data[MANUFACTURER_DATA_ID_VF0]

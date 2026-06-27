@@ -13,6 +13,10 @@
     {
     	"manufacturer_id": 8394
     },
+    {
+    	"connectable": false,
+    	"local_name": "tzc*"
+    },
 	{ "local_name": "80:F4:16:*" }
   ],
   "codeowners": [
