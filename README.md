@@ -111,11 +111,18 @@ only a diagnostic device with the BLE debug protocol button.
 
 ## Home Assistant BLE Debug Protocol
 
-The integration adds a diagnostic button entity named **BLE debug protocol** on
-both real scale entries and debug-only entries. Press it from the device page to
-capture Bluetooth advertisements for 2 minutes from Home Assistant itself. The
-protocol also records one connection attempt for the best matching scale
-candidate.
+The integration adds two diagnostic button entities on both real scale entries
+and debug-only entries.
+
+**BLE debug protocol** captures the broader Bluetooth advertisement stream for
+2 minutes from Home Assistant itself. The protocol also records one connection
+attempt for the best matching scale candidate.
+
+**BLE focused debug protocol** captures for 1 minute, locks on to the first
+matching scale/target address, ignores other devices, skips the connection
+attempt, and writes packet-by-packet weight time series data. Use this mode when
+you are actively stepping on the scale and want to inspect the short burst of
+weight advertisements.
 
 When the capture finishes, Home Assistant creates a persistent notification with
 links to:

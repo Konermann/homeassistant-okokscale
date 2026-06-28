@@ -126,6 +126,26 @@ def parse_maxxmee_c0_raw_value(raw_value: bytes) -> float | None:
     return reading.weight
 
 
+def latest_stable_maxxmee_c0_manufacturer_reading(
+    manufacturer_data: Mapping[int, bytes],
+) -> tuple[int, bytes, ScaleReading] | None:
+    """Return the last stable MAXXMEE C0 reading in manufacturer data."""
+    latest_reading: tuple[int, bytes, ScaleReading] | None = None
+    for manufacturer_id, payload in manufacturer_data.items():
+        raw_value = maxxmee_c0_raw_from_manufacturer_data(
+            manufacturer_id,
+            payload,
+        )
+        if raw_value is None:
+            continue
+
+        reading = decode_maxxmee_c0_raw_value(raw_value)
+        if reading is not None and reading.final:
+            latest_reading = (manufacturer_id, raw_value, reading)
+
+    return latest_reading
+
+
 def decode_vc0_payload(payload: bytes) -> ScaleReading | None:
     """Decode a legacy VC0 payload as delivered by Home Assistant."""
     if len(payload) != VC0_PAYLOAD_LENGTH:

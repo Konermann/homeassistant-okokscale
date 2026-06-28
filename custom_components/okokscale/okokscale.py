@@ -410,38 +410,35 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
     def _process_manufacturer_data_vc0(self, manufacturer_data):
         reading = None
         reading_key = None
+        latest_maxxmee_reading = None
+        latest_maxxmee_reading_key = None
+        latest_maxxmee_raw_value = None
         for key, _data in manufacturer_data.items():
             # Run through the whole list of values so we get the final reading
             if not is_c0_manufacturer_id(key):
                 continue
 
             raw_value = maxxmee_c0_raw_from_manufacturer_data(key, _data)
-            maxxmee_reading = (
+            current_maxxmee_reading = (
                 decode_maxxmee_c0_raw_value(raw_value)
                 if raw_value is not None
                 else None
             )
-            if maxxmee_reading is not None:
-                if not maxxmee_reading.final:
+            if current_maxxmee_reading is not None:
+                if not current_maxxmee_reading.final:
                     _LOGGER.debug(
                         "Ignoring unstable MAXXMEE C0 data for %s; "
                         "status=0x%02x raw=0x%s",
                         hex(key),
-                        maxxmee_reading.status,
+                        current_maxxmee_reading.status,
                         raw_value.hex(),
                     )
                     continue
 
-                _LOGGER.debug(
-                    "Parsed stable MAXXMEE C0 data for %s; "
-                    "weight=%.2f kg status=0x%02x raw=0x%s",
-                    hex(key),
-                    maxxmee_reading.weight,
-                    maxxmee_reading.status,
-                    raw_value.hex(),
-                )
-                self._update_mass_sensor(maxxmee_reading)
-                return
+                latest_maxxmee_reading = current_maxxmee_reading
+                latest_maxxmee_reading_key = key
+                latest_maxxmee_raw_value = raw_value
+                continue
 
             vc0_reading = decode_vc0_payload(_data)
             if vc0_reading is None:
@@ -459,6 +456,19 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
             elif reading is None:
                 reading = vc0_reading
                 reading_key = key
+
+        if latest_maxxmee_reading is not None:
+            _LOGGER.debug(
+                "Parsed latest stable MAXXMEE C0 data for %s; "
+                "weight=%.2f kg status=0x%02x source=%s raw=0x%s",
+                hex(latest_maxxmee_reading_key),
+                latest_maxxmee_reading.weight,
+                latest_maxxmee_reading.status,
+                latest_maxxmee_reading.weight_source,
+                latest_maxxmee_raw_value.hex(),
+            )
+            self._update_mass_sensor(latest_maxxmee_reading)
+            return
 
         if reading is None:
             return

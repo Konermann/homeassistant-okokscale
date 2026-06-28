@@ -23,6 +23,7 @@ from .parser import (
 )
 
 DEBUG_CAPTURE_SECONDS = 120
+FOCUSED_DEBUG_CAPTURE_SECONDS = 60
 DEBUG_DIRECTORY = "okokscale_debug"
 DEBUG_NOTIFICATION_ID = "okokscale_debug_protocol"
 DEBUG_URL_PATH = "/api/okokscale_debug"
@@ -310,12 +311,57 @@ def summarize_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         "started_at": start_record.get("timestamp"),
         "finished_at": end_record.get("timestamp"),
         "duration_seconds": start_record.get("duration_seconds"),
+        "focused": start_record.get("focused", False),
         "targets": start_record.get("targets", []),
         "device_count": len(device_summaries),
         "advertisement_count": advertisement_count,
         "connection_attempts": connection_attempts,
+        "weight_time_series": weight_time_series(records),
         "devices": device_summaries,
     }
+
+
+def weight_time_series(records: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
+    """Extract packet-by-packet decoded weight events."""
+    series: list[dict[str, Any]] = []
+
+    for event_index, record in enumerate(records):
+        if record.get("type") != "advertisement":
+            continue
+
+        for classification in record.get("classifications", []):
+            classification_type = classification.get("type")
+            if classification_type == "maxxmee_c0_weight":
+                weight = classification.get("weight_kg")
+                unit = "kg"
+            elif classification_type == "legacy_vc0_weight":
+                weight = classification.get("weight")
+                unit = classification.get("unit")
+            else:
+                continue
+
+            series.append(
+                {
+                    "event_index": event_index,
+                    "timestamp": record.get("timestamp"),
+                    "elapsed_seconds": record.get("elapsed_seconds"),
+                    "address": record.get("address"),
+                    "name": record.get("name"),
+                    "type": classification_type,
+                    "manufacturer_id_hex": classification.get(
+                        "manufacturer_id_hex"
+                    ),
+                    "stable": classification.get("stable"),
+                    "status_hex": classification.get("status_hex"),
+                    "weight": weight,
+                    "unit": unit,
+                    "raw_weight": classification.get("raw_weight"),
+                    "weight_source": classification.get("weight_source"),
+                    "raw": classification.get("raw"),
+                }
+            )
+
+    return series
 
 
 def find_best_connection_candidate(
@@ -354,6 +400,7 @@ def render_markdown_report(summary: Mapping[str, Any]) -> str:
         f"- Started: `{summary.get('started_at')}`",
         f"- Finished: `{summary.get('finished_at')}`",
         f"- Duration: `{summary.get('duration_seconds')}` seconds",
+        f"- Focused: `{summary.get('focused')}`",
         f"- Targets: `{', '.join(summary.get('targets', [])) or 'none'}`",
         f"- Devices seen: `{summary.get('device_count')}`",
         f"- Advertisements recorded: `{summary.get('advertisement_count')}`",
@@ -379,6 +426,41 @@ def render_markdown_report(summary: Mapping[str, Any]) -> str:
             )
     else:
         lines.append("No connection attempt was possible.")
+
+    lines.extend(
+        [
+            "",
+            "## Weight Time Series",
+            "",
+        ]
+    )
+
+    series = summary.get("weight_time_series", [])
+    if series:
+        lines.append(
+            "| Event | Elapsed | Address | Type | Stable | Weight | Source | Raw |"
+        )
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+        for event in series:
+            raw = str(event.get("raw", "")).replace("|", "\\|")
+            weight = event.get("weight")
+            unit = event.get("unit") or ""
+            weight_text = "" if weight is None else f"{weight} {unit}".strip()
+            lines.append(
+                "| {event_index} | {elapsed} | {address} | {type} | "
+                "{stable} | {weight} | {source} | `{raw}` |".format(
+                    event_index=event.get("event_index", ""),
+                    elapsed=event.get("elapsed_seconds", ""),
+                    address=event.get("address", ""),
+                    type=event.get("type", ""),
+                    stable=event.get("stable", ""),
+                    weight=weight_text,
+                    source=event.get("weight_source", ""),
+                    raw=raw,
+                )
+            )
+    else:
+        lines.append("No decoded weight packets were observed.")
 
     lines.extend(
         [
@@ -519,6 +601,7 @@ class OKOKScaleDebugRecorder:
         self.latest_error: str | None = None
         self.latest_device_count: int | None = None
         self.latest_advertisement_count: int | None = None
+        self.latest_mode: str | None = None
 
     def add_listener(self, listener: Callable[[], None]) -> Callable[[], None]:
         """Register a state-change listener."""
@@ -540,7 +623,13 @@ class OKOKScaleDebugRecorder:
         if self._task is not None and not self._task.done():
             self._task.cancel()
 
-    async def async_start(self, hass: Any, targets: list[str]) -> None:
+    async def async_start(
+        self,
+        hass: Any,
+        targets: list[str],
+        duration: int | None = None,
+        focused: bool = False,
+    ) -> None:
         """Start a debug capture in the background."""
         if self.running:
             raise RuntimeError("OKOK Scale BLE debug protocol is already running")
@@ -549,10 +638,24 @@ class OKOKScaleDebugRecorder:
         self.latest_error = None
         self.latest_started_at = utc_now_iso()
         self.latest_finished_at = None
+        self.latest_mode = "focused" if focused else "full"
         self._notify_listeners()
-        self._task = hass.async_create_task(self._async_capture(hass, targets))
+        self._task = hass.async_create_task(
+            self._async_capture(
+                hass,
+                targets,
+                duration or self.duration,
+                focused,
+            )
+        )
 
-    async def _async_capture(self, hass: Any, targets: list[str]) -> None:
+    async def _async_capture(
+        self,
+        hass: Any,
+        targets: list[str],
+        duration: int,
+        focused: bool,
+    ) -> None:
         """Capture advertisements and write the resulting protocol."""
         from homeassistant.components import persistent_notification
         from homeassistant.components.bluetooth import (
@@ -565,7 +668,8 @@ class OKOKScaleDebugRecorder:
             {
                 "type": "session_start",
                 "timestamp": self.latest_started_at,
-                "duration_seconds": self.duration,
+                "duration_seconds": duration,
+                "focused": focused,
                 "targets": targets,
                 "matchers": [
                     {"connectable": False},
@@ -574,15 +678,28 @@ class OKOKScaleDebugRecorder:
             }
         ]
         started_monotonic = time.monotonic()
+        focused_address: str | None = None
 
         def _record(service_info: Any, *_args: Any) -> None:
-            records.append(
-                bluetooth_service_info_to_event(
-                    service_info,
-                    started_monotonic,
-                    targets,
-                )
+            nonlocal focused_address
+            event = bluetooth_service_info_to_event(
+                service_info,
+                started_monotonic,
+                targets,
             )
+            if focused:
+                address = event.get("address")
+                if focused_address is None:
+                    if not event.get("target_match") and not event.get(
+                        "classifications"
+                    ):
+                        return
+                    focused_address = address
+                elif address != focused_address:
+                    return
+                event["focused_address"] = focused_address
+
+            records.append(event)
 
         try:
             for matcher in records[0]["matchers"]:
@@ -594,10 +711,11 @@ class OKOKScaleDebugRecorder:
                         BluetoothScanningMode.PASSIVE,
                     )
                 )
-            await asyncio.sleep(self.duration)
+            await asyncio.sleep(duration)
             while cancel_callbacks:
                 cancel_callbacks.pop()()
-            records.append(await self._async_connection_attempt(hass, records))
+            if not focused:
+                records.append(await self._async_connection_attempt(hass, records))
             self.latest_finished_at = utc_now_iso()
             records.append(
                 {"type": "session_end", "timestamp": self.latest_finished_at}

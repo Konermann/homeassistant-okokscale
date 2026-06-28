@@ -121,6 +121,11 @@ class HADebugProtocolTest(unittest.TestCase):
 
         self.assertEqual(summary["devices"][0]["address"], DummyServiceInfo.address)
         self.assertTrue(summary["devices"][0]["known_scale"])
+        self.assertEqual(
+            summary["weight_time_series"][0]["address"],
+            scale_event["address"],
+        )
+        self.assertAlmostEqual(summary["weight_time_series"][0]["weight"], 78.30)
 
     def test_connection_candidate_prefers_known_scale_packet(self) -> None:
         scale_event = debug.bluetooth_service_info_to_event(

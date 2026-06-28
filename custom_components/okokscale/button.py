@@ -10,6 +10,7 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import CONF_DEBUG_ONLY, CONF_DEBUG_TARGET, DOMAIN
+from .debug import FOCUSED_DEBUG_CAPTURE_SECONDS
 from .runtime import OKOKScaleRuntimeData
 
 PARALLEL_UPDATES = 0
@@ -23,7 +24,26 @@ async def async_setup_entry(
 ) -> None:
     """Set up OKOK Scale diagnostic buttons."""
     runtime_data: OKOKScaleRuntimeData = entry.runtime_data
-    async_add_entities([OKOKScaleDebugProtocolButton(entry, runtime_data)])
+    async_add_entities(
+        [
+            OKOKScaleDebugProtocolButton(
+                entry,
+                runtime_data,
+                "BLE debug protocol",
+                "ble_debug_protocol",
+                "mdi:bluetooth-connect",
+            ),
+            OKOKScaleDebugProtocolButton(
+                entry,
+                runtime_data,
+                "BLE focused debug protocol",
+                "ble_focused_debug_protocol",
+                "mdi:bluetooth-audio",
+                duration=FOCUSED_DEBUG_CAPTURE_SECONDS,
+                focused=True,
+            ),
+        ]
+    )
 
 
 class OKOKScaleDebugProtocolButton(ButtonEntity):
@@ -38,12 +58,21 @@ class OKOKScaleDebugProtocolButton(ButtonEntity):
         self,
         entry: config_entries.ConfigEntry,
         runtime_data: OKOKScaleRuntimeData,
+        name: str,
+        unique_id_suffix: str,
+        icon: str,
+        duration: int | None = None,
+        focused: bool = False,
     ) -> None:
         """Initialize the debug protocol button."""
         self._entry = entry
         self._debug_recorder = runtime_data.debug_recorder
+        self._duration = duration
+        self._focused = focused
+        self._attr_icon = icon
+        self._attr_name = name
         assert entry.unique_id is not None
-        self._attr_unique_id = f"{entry.unique_id}_ble_debug_protocol"
+        self._attr_unique_id = f"{entry.unique_id}_{unique_id_suffix}"
 
     async def async_added_to_hass(self) -> None:
         """Register recorder state updates."""
@@ -71,7 +100,9 @@ class OKOKScaleDebugProtocolButton(ButtonEntity):
         """Return debug protocol status attributes."""
         return {
             "running": self._debug_recorder.running,
-            "duration_seconds": self._debug_recorder.duration,
+            "duration_seconds": self._duration or self._debug_recorder.duration,
+            "focused": self._focused,
+            "latest_mode": self._debug_recorder.latest_mode,
             "latest_started_at": self._debug_recorder.latest_started_at,
             "latest_finished_at": self._debug_recorder.latest_finished_at,
             "latest_device_count": self._debug_recorder.latest_device_count,
@@ -101,6 +132,11 @@ class OKOKScaleDebugProtocolButton(ButtonEntity):
             if target
         ]
         try:
-            await self._debug_recorder.async_start(self.hass, targets)
+            await self._debug_recorder.async_start(
+                self.hass,
+                targets,
+                duration=self._duration,
+                focused=self._focused,
+            )
         except RuntimeError as err:
             raise HomeAssistantError(str(err)) from err
