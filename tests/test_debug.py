@@ -127,6 +127,67 @@ class HADebugProtocolTest(unittest.TestCase):
         )
         self.assertAlmostEqual(summary["weight_time_series"][0]["weight"], 78.30)
 
+    def test_weight_time_series_selects_latest_stable_maxxmee_candidate(
+        self,
+    ) -> None:
+        event = {
+            "type": "advertisement",
+            "timestamp": "2026-06-28T20:50:37.968+00:00",
+            "elapsed_seconds": 43.891,
+            "address": "FE:98:00:00:14:D9",
+            "name": "tzc",
+            "target_match": True,
+            "rssi": -89,
+            "tx_power": None,
+            "connectable": True,
+            "manufacturer_data": [],
+            "service_data": [],
+            "classifications": [
+                {
+                    "type": "maxxmee_c0_weight",
+                    "manufacturer_id_hex": "0x5ac0",
+                    "raw": "c05a1e821392000225d914000098fe",
+                    "stable": True,
+                    "status_hex": "0x25",
+                    "weight_kg": 78.1,
+                    "raw_weight": 7810,
+                    "weight_source": "primary",
+                },
+                {
+                    "type": "maxxmee_c0_weight",
+                    "manufacturer_id_hex": "0xa1c0",
+                    "raw": "c0a11f3b1392000225d914000098fe",
+                    "stable": True,
+                    "status_hex": "0x25",
+                    "weight_kg": 79.95,
+                    "raw_weight": 7995,
+                    "weight_source": "primary",
+                },
+            ],
+        }
+        records = [
+            {
+                "type": "session_start",
+                "timestamp": "2026-06-28T20:49:54.077+00:00",
+                "duration_seconds": 60,
+                "focused": True,
+                "targets": ["FE:98:00:00:14:D9"],
+            },
+            event,
+            {
+                "type": "session_end",
+                "timestamp": "2026-06-28T20:50:54.081+00:00",
+            },
+        ]
+
+        summary = debug.summarize_records(records)
+
+        self.assertEqual(len(summary["weight_time_series"]), 1)
+        self.assertAlmostEqual(summary["weight_time_series"][0]["weight"], 79.95)
+        self.assertEqual(len(summary["candidate_weight_time_series"]), 2)
+        self.assertFalse(summary["candidate_weight_time_series"][0]["selected"])
+        self.assertTrue(summary["candidate_weight_time_series"][1]["selected"])
+
     def test_connection_candidate_prefers_known_scale_packet(self) -> None:
         scale_event = debug.bluetooth_service_info_to_event(
             DummyServiceInfo(),

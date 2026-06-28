@@ -317,49 +317,121 @@ def summarize_records(records: list[dict[str, Any]]) -> dict[str, Any]:
         "advertisement_count": advertisement_count,
         "connection_attempts": connection_attempts,
         "weight_time_series": weight_time_series(records),
+        "candidate_weight_time_series": candidate_weight_time_series(records),
         "devices": device_summaries,
     }
 
 
+def selected_weight_classification(
+    classifications: Iterable[Mapping[str, Any]],
+) -> Mapping[str, Any] | None:
+    """Return the classification that mirrors the live sensor choice."""
+    selected: Mapping[str, Any] | None = None
+
+    for classification in classifications:
+        if (
+            classification.get("type") == "maxxmee_c0_weight"
+            and classification.get("stable")
+        ):
+            selected = classification
+
+    if selected is not None:
+        return selected
+
+    for classification in classifications:
+        if (
+            classification.get("type") == "legacy_vc0_weight"
+            and classification.get("stable")
+        ):
+            selected = classification
+
+    return selected
+
+
+def weight_event_from_classification(
+    event_index: int,
+    record: Mapping[str, Any],
+    classification: Mapping[str, Any],
+    selected: bool,
+) -> dict[str, Any] | None:
+    """Convert one decoded weight classification into a series event."""
+    classification_type = classification.get("type")
+    if classification_type == "maxxmee_c0_weight":
+        weight = classification.get("weight_kg")
+        unit = "kg"
+    elif classification_type == "legacy_vc0_weight":
+        weight = classification.get("weight")
+        unit = classification.get("unit")
+    else:
+        return None
+
+    return {
+        "event_index": event_index,
+        "timestamp": record.get("timestamp"),
+        "elapsed_seconds": record.get("elapsed_seconds"),
+        "address": record.get("address"),
+        "name": record.get("name"),
+        "type": classification_type,
+        "manufacturer_id_hex": classification.get("manufacturer_id_hex"),
+        "stable": classification.get("stable"),
+        "selected": selected,
+        "status_hex": classification.get("status_hex"),
+        "weight": weight,
+        "unit": unit,
+        "raw_weight": classification.get("raw_weight"),
+        "weight_source": classification.get("weight_source"),
+        "raw": classification.get("raw"),
+    }
+
+
 def weight_time_series(records: Iterable[Mapping[str, Any]]) -> list[dict[str, Any]]:
-    """Extract packet-by-packet decoded weight events."""
+    """Extract the effective decoded weight for each advertisement event."""
     series: list[dict[str, Any]] = []
 
     for event_index, record in enumerate(records):
         if record.get("type") != "advertisement":
             continue
 
-        for classification in record.get("classifications", []):
-            classification_type = classification.get("type")
-            if classification_type == "maxxmee_c0_weight":
-                weight = classification.get("weight_kg")
-                unit = "kg"
-            elif classification_type == "legacy_vc0_weight":
-                weight = classification.get("weight")
-                unit = classification.get("unit")
-            else:
-                continue
+        classification = selected_weight_classification(
+            record.get("classifications", [])
+        )
+        if classification is None:
+            continue
 
-            series.append(
-                {
-                    "event_index": event_index,
-                    "timestamp": record.get("timestamp"),
-                    "elapsed_seconds": record.get("elapsed_seconds"),
-                    "address": record.get("address"),
-                    "name": record.get("name"),
-                    "type": classification_type,
-                    "manufacturer_id_hex": classification.get(
-                        "manufacturer_id_hex"
-                    ),
-                    "stable": classification.get("stable"),
-                    "status_hex": classification.get("status_hex"),
-                    "weight": weight,
-                    "unit": unit,
-                    "raw_weight": classification.get("raw_weight"),
-                    "weight_source": classification.get("weight_source"),
-                    "raw": classification.get("raw"),
-                }
+        event = weight_event_from_classification(
+            event_index,
+            record,
+            classification,
+            selected=True,
+        )
+        if event is not None:
+            series.append(event)
+
+    return series
+
+
+def candidate_weight_time_series(
+    records: Iterable[Mapping[str, Any]],
+) -> list[dict[str, Any]]:
+    """Extract all decoded candidate weight values per advertisement event."""
+    series: list[dict[str, Any]] = []
+
+    for event_index, record in enumerate(records):
+        if record.get("type") != "advertisement":
+            continue
+
+        selected_classification = selected_weight_classification(
+            record.get("classifications", [])
+        )
+        for classification in record.get("classifications", []):
+            event = weight_event_from_classification(
+                event_index,
+                record,
+                classification,
+                selected=classification is selected_classification,
             )
+            if event is not None:
+                series.append(event)
 
     return series
 
@@ -430,7 +502,7 @@ def render_markdown_report(summary: Mapping[str, Any]) -> str:
     lines.extend(
         [
             "",
-            "## Weight Time Series",
+            "## Effective Weight Time Series",
             "",
         ]
     )
@@ -461,6 +533,42 @@ def render_markdown_report(summary: Mapping[str, Any]) -> str:
             )
     else:
         lines.append("No decoded weight packets were observed.")
+
+    lines.extend(
+        [
+            "",
+            "## Candidate Weight Time Series",
+            "",
+        ]
+    )
+
+    candidate_series = summary.get("candidate_weight_time_series", [])
+    if candidate_series:
+        lines.append(
+            "| Event | Elapsed | Address | Selected | Stable | Weight | "
+            "Source | Raw |"
+        )
+        lines.append("| --- | --- | --- | --- | --- | --- | --- | --- |")
+        for event in candidate_series:
+            raw = str(event.get("raw", "")).replace("|", "\\|")
+            weight = event.get("weight")
+            unit = event.get("unit") or ""
+            weight_text = "" if weight is None else f"{weight} {unit}".strip()
+            lines.append(
+                "| {event_index} | {elapsed} | {address} | {selected} | "
+                "{stable} | {weight} | {source} | `{raw}` |".format(
+                    event_index=event.get("event_index", ""),
+                    elapsed=event.get("elapsed_seconds", ""),
+                    address=event.get("address", ""),
+                    selected=event.get("selected", False),
+                    stable=event.get("stable", ""),
+                    weight=weight_text,
+                    source=event.get("weight_source", ""),
+                    raw=raw,
+                )
+            )
+    else:
+        lines.append("No candidate weight packets were observed.")
 
     lines.extend(
         [
