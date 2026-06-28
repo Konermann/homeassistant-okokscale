@@ -102,12 +102,20 @@ If auto-discovery does not appear, add the integration manually from Home
 Assistant. This fork checks both passive and connectable Bluetooth discovery
 caches because the MAXXMEE device can emit different advertisement shapes.
 
+Manual setup can also create a debug-only entry. Go to **Settings**,
+**Devices & services**, **Add integration**, then choose **MAXXMEE BLE Scale**.
+Either select a discovered BLE advertisement or enter a manual debug target such
+as `tzc`, `maxxmee`, a MAC/address, or a payload fragment such as `12025002`.
+If the target is not recognized as a supported scale yet, the integration adds
+only a diagnostic device with the BLE debug protocol button.
+
 ## Home Assistant BLE Debug Protocol
 
-The integration adds a diagnostic button entity named **BLE debug protocol**.
-Press it from the device page to capture Bluetooth advertisements for 2 minutes
-from Home Assistant itself. The protocol also records one connection attempt for
-the best matching scale candidate.
+The integration adds a diagnostic button entity named **BLE debug protocol** on
+both real scale entries and debug-only entries. Press it from the device page to
+capture Bluetooth advertisements for 2 minutes from Home Assistant itself. The
+protocol also records one connection attempt for the best matching scale
+candidate.
 
 When the capture finishes, Home Assistant creates a persistent notification with
 links to:

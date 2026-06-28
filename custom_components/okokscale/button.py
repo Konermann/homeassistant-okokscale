@@ -9,7 +9,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from .const import DOMAIN
+from .const import CONF_DEBUG_ONLY, CONF_DEBUG_TARGET, DOMAIN
 from .runtime import OKOKScaleRuntimeData
 
 PARALLEL_UPDATES = 0
@@ -62,8 +62,8 @@ class OKOKScaleDebugProtocolButton(ButtonEntity):
         assert self._entry.unique_id is not None
         return {
             "identifiers": {(DOMAIN, self._entry.unique_id)},
-            "manufacturer": "OKOK",
-            "name": self._entry.title or "OKOK Scale",
+            "manufacturer": "MAXXMEE",
+            "name": self._entry.title or "MAXXMEE BLE Scale",
         }
 
     @property
@@ -82,6 +82,8 @@ class OKOKScaleDebugProtocolButton(ButtonEntity):
             "latest_summary_url": self._debug_recorder.latest_summary_url,
             "latest_protocol_url": self._debug_recorder.latest_protocol_url,
             "latest_error": self._debug_recorder.latest_error,
+            "debug_only": self._entry.data.get(CONF_DEBUG_ONLY, False),
+            "debug_target": self._entry.data.get(CONF_DEBUG_TARGET),
         }
 
     async def async_press(self) -> None:
@@ -91,6 +93,7 @@ class OKOKScaleDebugProtocolButton(ButtonEntity):
             for target in (
                 self._entry.unique_id,
                 self._entry.title,
+                self._entry.data.get(CONF_DEBUG_TARGET),
                 "tzc",
                 "maxxmee",
                 MAXXMEE_SERVICE_UUID,

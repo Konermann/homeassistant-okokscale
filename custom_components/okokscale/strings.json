@@ -3,9 +3,10 @@
     "flow_title": "[%key:component::bluetooth::config::flow_title%]",
     "step": {
       "user": {
-        "description": "[%key:component::bluetooth::config::step::user::description%]",
+        "description": "Select a discovered BLE device, or enter a manual debug target such as tzc, maxxmee, a MAC/address, or a payload fragment. Unsupported/manual targets create a debug-only entry with the BLE debug protocol button.",
         "data": {
-          "address": "[%key:component::bluetooth::config::step::user::data::address%]"
+          "debug_target": "Manual debug target",
+          "discovered_device": "Discovered BLE device"
         }
       },
       "bluetooth_confirm": {
@@ -17,6 +18,9 @@
       "no_devices_found": "[%key:common::config_flow::abort::no_devices_found%]",
       "already_in_progress": "[%key:common::config_flow::abort::already_in_progress%]",
       "already_configured": "[%key:common::config_flow::abort::already_configured_device%]"
+    },
+    "error": {
+      "target_required": "Select a discovered BLE device or enter a manual debug target"
     }
   }
 }

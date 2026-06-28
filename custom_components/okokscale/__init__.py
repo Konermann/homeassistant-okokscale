@@ -16,11 +16,13 @@ from homeassistant.const import Platform
 from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers import entity_registry
 
+from .const import CONF_DEBUG_ONLY
 from .debug import OKOKScaleDebugRecorder
 from .okokscale import OKOKScaleBluetoothDeviceData
 from .runtime import OKOKScaleRuntimeData
 
 PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
+DEBUG_PLATFORMS: list[Platform] = [Platform.BUTTON]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -29,6 +31,18 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OKOK Scale device from a config entry."""
     address = entry.unique_id
     assert address is not None
+
+    debug_recorder = OKOKScaleDebugRecorder()
+    entry.async_on_unload(debug_recorder.cancel)
+
+    if entry.data.get(CONF_DEBUG_ONLY):
+        entry.runtime_data = OKOKScaleRuntimeData(
+            coordinator=None,
+            device_data=None,
+            debug_recorder=debug_recorder,
+        )
+        await hass.config_entries.async_forward_entry_setups(entry, DEBUG_PLATFORMS)
+        return True
 
     data = OKOKScaleBluetoothDeviceData()
 
@@ -80,9 +94,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         connectable=False,
     )
 
-    debug_recorder = OKOKScaleDebugRecorder()
-    entry.async_on_unload(debug_recorder.cancel)
-
     entry.runtime_data = OKOKScaleRuntimeData(
         coordinator=coordinator,
         device_data=data,
@@ -98,7 +109,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    platforms = DEBUG_PLATFORMS if entry.data.get(CONF_DEBUG_ONLY) else PLATFORMS
+    return await hass.config_entries.async_unload_platforms(entry, platforms)
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:

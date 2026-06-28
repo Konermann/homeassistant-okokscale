@@ -125,7 +125,10 @@ async def async_setup_entry(
 ) -> None:
     """Set up the OKOK Scale sensors."""
     runtime_data: OKOKScaleRuntimeData = entry.runtime_data
-    coordinator: PassiveBluetoothProcessorCoordinator = runtime_data.coordinator
+    coordinator: PassiveBluetoothProcessorCoordinator | None = (
+        runtime_data.coordinator
+    )
+    assert coordinator is not None
     processor = PassiveBluetoothDataProcessor(sensor_update_to_bluetooth_data_update)
     entry.async_on_unload(
         processor.async_add_entities_listener(

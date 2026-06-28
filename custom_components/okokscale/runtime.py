@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 from homeassistant.components.bluetooth.active_update_processor import (
     ActiveBluetoothProcessorCoordinator,
@@ -16,6 +17,6 @@ from .okokscale import OKOKScaleBluetoothDeviceData
 class OKOKScaleRuntimeData:
     """Runtime objects shared by OKOK Scale platforms."""
 
-    coordinator: ActiveBluetoothProcessorCoordinator
-    device_data: OKOKScaleBluetoothDeviceData
+    coordinator: Optional[ActiveBluetoothProcessorCoordinator]
+    device_data: Optional[OKOKScaleBluetoothDeviceData]
     debug_recorder: OKOKScaleDebugRecorder

@@ -13,10 +13,14 @@
             },
             "user": {
                 "data": {
-                    "address": "Device"
+                    "debug_target": "Manual debug target",
+                    "discovered_device": "Discovered BLE device"
                 },
-                "description": "Choose a device to set up"
+                "description": "Select a discovered BLE device, or enter a manual debug target such as tzc, maxxmee, a MAC/address, or a payload fragment. Unsupported/manual targets create a debug-only entry with the BLE debug protocol button."
             }
+        },
+        "error": {
+            "target_required": "Select a discovered BLE device or enter a manual debug target"
         }
     },
 	"entity": {

@@ -9,9 +9,13 @@ from homeassistant.components.bluetooth import (
     async_discovered_service_info,
 )
 from homeassistant.config_entries import ConfigFlow, ConfigFlowResult
-from homeassistant.const import CONF_ADDRESS
 
-from .const import DOMAIN
+from .const import (
+    CONF_DEBUG_ONLY,
+    CONF_DEBUG_TARGET,
+    CONF_DISCOVERED_DEVICE,
+    DOMAIN,
+)
 from .okokscale import OKOKScaleBluetoothDeviceData as DeviceData
 
 _LOGGER = logging.getLogger(__name__)
@@ -28,6 +32,8 @@ class OKOKScaleConfigFlow(ConfigFlow, domain=DOMAIN):
         self._discovery_info: BluetoothServiceInfoBleak | None = None
         self._discovered_device: DeviceData | None = None
         self._discovered_devices: dict[str, str] = {}
+        self._discovered_titles: dict[str, str] = {}
+        self._supported_devices: set[str] = set()
 
     async def async_step_bluetooth(
         self, discovery_info: BluetoothServiceInfoBleak
@@ -72,15 +78,42 @@ class OKOKScaleConfigFlow(ConfigFlow, domain=DOMAIN):
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> ConfigFlowResult:
-        """Handle the user step to pick discovered device."""
+        """Handle the user step to pick a device or create debug entry."""
+        self._refresh_discovered_devices()
+
         if user_input is not None:
-            address = user_input[CONF_ADDRESS]
-            await self.async_set_unique_id(address, raise_on_progress=False)
+            selected_device = user_input.get(CONF_DISCOVERED_DEVICE)
+            manual_target = (user_input.get(CONF_DEBUG_TARGET) or "").strip()
+            target = manual_target or selected_device
+            if not target:
+                return self._show_user_form({"base": "target_required"})
+
+            if not manual_target and selected_device in self._supported_devices:
+                await self.async_set_unique_id(target, raise_on_progress=False)
+                self._abort_if_unique_id_configured()
+                return self.async_create_entry(
+                    title=self._discovered_titles[target],
+                    data={},
+                )
+
+            unique_id = f"debug:{target.lower()}"
+            await self.async_set_unique_id(unique_id, raise_on_progress=False)
             self._abort_if_unique_id_configured()
             return self.async_create_entry(
-                title=self._discovered_devices[address], data={}
+                title=f"MAXXMEE BLE debug ({target})",
+                data={
+                    CONF_DEBUG_ONLY: True,
+                    CONF_DEBUG_TARGET: target,
+                },
             )
 
+        return self._show_user_form()
+
+    def _refresh_discovered_devices(self) -> None:
+        """Refresh the known BLE devices for the user setup form."""
+        self._discovered_devices.clear()
+        self._discovered_titles.clear()
+        self._supported_devices.clear()
         current_addresses = self._async_current_ids(include_ignore=False)
         for connectable in (False, True):
             for discovery_info in async_discovered_service_info(
@@ -93,19 +126,47 @@ class OKOKScaleConfigFlow(ConfigFlow, domain=DOMAIN):
                 ):
                     continue
                 device = DeviceData()
-                if device.supported(discovery_info):
-                    self._discovered_devices[address] = (
-                        device.title
-                        or device.get_device_name()
-                        or discovery_info.name
-                    )
+                supported = device.supported(discovery_info)
+                if supported:
+                    self._supported_devices.add(address)
+                title = (
+                    device.title
+                    or device.get_device_name()
+                    or discovery_info.name
+                    or "Unknown BLE device"
+                )
+                self._discovered_titles[address] = title
+                self._discovered_devices[address] = self._format_device_label(
+                    discovery_info, title, supported
+                )
 
-        if not self._discovered_devices:
-            return self.async_abort(reason="no_devices_found")
+    @staticmethod
+    def _format_device_label(
+        discovery_info: BluetoothServiceInfoBleak,
+        title: str,
+        supported: bool,
+    ) -> str:
+        """Return a readable discovered-device label."""
+        mode = "supported" if supported else "debug only"
+        rssi = getattr(discovery_info, "rssi", None)
+        rssi_text = f", RSSI {rssi}" if rssi is not None else ""
+        return f"{title} ({discovery_info.address}{rssi_text}, {mode})"
+
+    def _show_user_form(
+        self,
+        errors: dict[str, str] | None = None,
+    ) -> ConfigFlowResult:
+        """Show the manual setup/debug form."""
+        schema_fields: dict[Any, Any] = {
+            vol.Optional(CONF_DEBUG_TARGET): str,
+        }
+        if self._discovered_devices:
+            schema_fields[
+                vol.Optional(CONF_DISCOVERED_DEVICE)
+            ] = vol.In(self._discovered_devices)
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
-                {vol.Required(CONF_ADDRESS): vol.In(self._discovered_devices)}
-            ),
+            data_schema=vol.Schema(schema_fields),
+            errors=errors or {},
         )
