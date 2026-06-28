@@ -109,6 +109,79 @@ as `tzc`, `maxxmee`, a MAC/address, or a payload fragment such as `12025002`.
 If the target is not recognized as a supported scale yet, the integration adds
 only a diagnostic device with the BLE debug protocol button.
 
+## Measurement History and Users
+
+The integration stores stable weight measurements in Home Assistant storage.
+Duplicate broadcasts from the same weighing burst are suppressed.
+
+By default, one user named **Person 1** is created. Additional users can be
+added from **Developer tools**, **Actions** by calling:
+
+- `okokscale.add_user`
+- `okokscale.rename_user`
+
+When more than one user exists, new measurements are assigned to the user whose
+latest stored weight is closest to the new weight. For example, a `68 kg`
+measurement is assigned to a user last measured near `60 kg` rather than a user
+last measured near `80 kg`.
+
+Wrong measurements can be edited, reassigned, or deleted from **Developer
+tools**, **Actions**:
+
+- `okokscale.add_measurement`
+- `okokscale.update_measurement`
+- `okokscale.delete_measurement`
+
+The latest user measurement sensors expose `measurement_id`, `user_id`,
+`measured_at`, and `recent_measurements` attributes. Use those IDs when editing,
+reassigning, or deleting a measurement.
+
+Editing and deleting measurements updates this integration's stored history and
+current sensor states. Home Assistant's recorder may still retain already
+recorded historical sensor states until your recorder retention or purge policy
+removes them.
+
+## Per-User Graph Sensors
+
+Each user gets graphable sensors for:
+
+- latest weight
+- latest morning weight, from `05:00` to `10:59`
+- latest midday weight, from `11:00` to `16:59`
+- latest evening weight, from `17:00` to `04:59`
+
+These are ordinary Home Assistant sensors, so their history can be shown in
+Lovelace history/statistics graphs.
+
+## Weight Events and Apple Health Shortcuts
+
+Every stored measurement fires the Home Assistant event:
+
+```text
+okokscale_weight_recorded
+```
+
+The event data includes `user_id`, `user_name`, `weight_kg`, `measured_at`,
+`measurement_id`, and `apple_health_shortcut_text`. You can subscribe to a
+person's measurements with a Home Assistant automation filtered by `user_id`,
+then send a mobile notification or call an iOS Shortcut that writes the value to
+Apple Health.
+
+Example automation trigger:
+
+```yaml
+trigger:
+  - platform: event
+    event_type: okokscale_weight_recorded
+    event_data:
+      user_id: person_1
+action:
+  - service: notify.mobile_app_your_iphone
+    data:
+      title: "New weight"
+      message: "{{ trigger.event.data.apple_health_shortcut_text }}"
+```
+
 ## Home Assistant BLE Debug Protocol
 
 The integration adds two diagnostic button entities on both real scale entries

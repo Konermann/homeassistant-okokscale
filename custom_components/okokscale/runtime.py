@@ -10,6 +10,7 @@ from homeassistant.components.bluetooth.active_update_processor import (
 )
 
 from .debug import OKOKScaleDebugRecorder
+from .measurements import OKOKScaleMeasurementStore
 from .okokscale import OKOKScaleBluetoothDeviceData
 
 
@@ -20,3 +21,4 @@ class OKOKScaleRuntimeData:
     coordinator: Optional[ActiveBluetoothProcessorCoordinator]
     device_data: Optional[OKOKScaleBluetoothDeviceData]
     debug_recorder: OKOKScaleDebugRecorder
+    measurement_store: Optional[OKOKScaleMeasurementStore] = None

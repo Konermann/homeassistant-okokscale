@@ -1,0 +1,124 @@
+add_user:
+  name: Add user
+  description: Add a scale user for automatic measurement assignment.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID when more than one scale is configured.
+      example: "01J..."
+      selector:
+        text:
+    name:
+      name: Name
+      description: Display name for the user.
+      required: true
+      example: "Alice"
+      selector:
+        text:
+
+rename_user:
+  name: Rename user
+  description: Rename an existing scale user.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID when more than one scale is configured.
+      selector:
+        text:
+    user_id:
+      name: User ID
+      description: User ID from a user weight sensor attribute.
+      required: true
+      selector:
+        text:
+    name:
+      name: Name
+      description: New display name.
+      required: true
+      selector:
+        text:
+
+add_measurement:
+  name: Add measurement
+  description: Add a manual measurement.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID when more than one scale is configured.
+      selector:
+        text:
+    weight_kg:
+      name: Weight
+      description: Weight in kilograms.
+      required: true
+      selector:
+        number:
+          min: 0
+          max: 300
+          step: 0.01
+          unit_of_measurement: kg
+          mode: box
+    user_id:
+      name: User ID
+      description: Optional user ID. If omitted, closest-user assignment is used.
+      selector:
+        text:
+    measured_at:
+      name: Measured at
+      description: Optional ISO timestamp. If omitted, current time is used.
+      example: "2026-06-28T07:30:00+02:00"
+      selector:
+        text:
+
+update_measurement:
+  name: Update measurement
+  description: Edit a stored measurement, including assigning it to another user.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID when more than one scale is configured.
+      selector:
+        text:
+    measurement_id:
+      name: Measurement ID
+      description: Measurement ID from a user weight sensor attribute or event.
+      required: true
+      selector:
+        text:
+    weight_kg:
+      name: Weight
+      description: Optional corrected weight in kilograms.
+      selector:
+        number:
+          min: 0
+          max: 300
+          step: 0.01
+          unit_of_measurement: kg
+          mode: box
+    user_id:
+      name: User ID
+      description: Optional new user ID for this measurement.
+      selector:
+        text:
+    measured_at:
+      name: Measured at
+      description: Optional corrected ISO timestamp.
+      example: "2026-06-28T07:30:00+02:00"
+      selector:
+        text:
+
+delete_measurement:
+  name: Delete measurement
+  description: Delete a wrong stored measurement.
+  fields:
+    entry_id:
+      name: Entry ID
+      description: Optional config entry ID when more than one scale is configured.
+      selector:
+        text:
+    measurement_id:
+      name: Measurement ID
+      description: Measurement ID from a user weight sensor attribute or event.
+      required: true
+      selector:
+        text:

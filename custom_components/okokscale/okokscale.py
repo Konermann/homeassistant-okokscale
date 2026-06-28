@@ -5,6 +5,7 @@ This file needs to become a library once we have everything working
 """
 
 import logging
+from collections.abc import Callable
 
 from bleak import AdvertisementData, BleakClient, BLEDevice
 from bleak_retry_connector import BleakClientWithServiceCache, establish_connection
@@ -88,6 +89,7 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
     _expected_disconnect = False
 
     supports_impedance = False
+    measurement_callback: Callable[[ScaleReading], None] | None = None
 
     def _start_update(self, service_info: BluetoothServiceInfo) -> None:
         """Update from BLE advertisement data."""
@@ -495,6 +497,9 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
         )
 
         self.update_predefined_sensor(base_description, reading.weight)
+
+        if self.measurement_callback:
+            self.measurement_callback(reading)
 
     def _process_manufacturer_data_vf0(self, manufacturer_data):
         data = manufacturer_data[MANUFACTURER_DATA_ID_VF0]

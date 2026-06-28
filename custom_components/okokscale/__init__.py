@@ -3,6 +3,7 @@
 import logging
 from typing import Any
 
+import voluptuous as vol
 from homeassistant.components.bluetooth import (
     BluetoothScanningMode,
     BluetoothServiceInfoBleak,
@@ -14,10 +15,12 @@ from homeassistant.components.bluetooth.active_update_processor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import Platform
 from homeassistant.core import CoreState, HomeAssistant, callback
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry
 
-from .const import CONF_DEBUG_ONLY
+from .const import CONF_DEBUG_ONLY, DOMAIN
 from .debug import OKOKScaleDebugRecorder
+from .measurements import OKOKScaleMeasurementStore
 from .okokscale import OKOKScaleBluetoothDeviceData
 from .runtime import OKOKScaleRuntimeData
 
@@ -26,11 +29,18 @@ DEBUG_PLATFORMS: list[Platform] = [Platform.BUTTON]
 
 _LOGGER = logging.getLogger(__name__)
 
+DATA_MEASUREMENT_STORES = "measurement_stores"
+DATA_SERVICES_REGISTERED = "services_registered"
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OKOK Scale device from a config entry."""
     address = entry.unique_id
     assert address is not None
+
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    domain_data.setdefault(DATA_MEASUREMENT_STORES, {})
+    _async_register_measurement_services(hass)
 
     debug_recorder = OKOKScaleDebugRecorder()
     entry.async_on_unload(debug_recorder.cancel)
@@ -40,11 +50,31 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             coordinator=None,
             device_data=None,
             debug_recorder=debug_recorder,
+            measurement_store=None,
         )
         await hass.config_entries.async_forward_entry_setups(entry, DEBUG_PLATFORMS)
         return True
 
     data = OKOKScaleBluetoothDeviceData()
+    measurement_store = OKOKScaleMeasurementStore(hass, entry.entry_id)
+    await measurement_store.async_load()
+    domain_data[DATA_MEASUREMENT_STORES][entry.entry_id] = measurement_store
+
+    def _record_measurement(reading) -> None:
+        hass.async_create_task(
+            measurement_store.async_record_measurement(
+                weight_kg=reading.weight,
+                source="ble",
+                metadata={
+                    "unit": reading.unit,
+                    "raw_weight": reading.raw_weight,
+                    "status": reading.status,
+                    "weight_source": reading.weight_source,
+                },
+            )
+        )
+
+    data.measurement_callback = _record_measurement
 
     def _needs_poll(
         service_info: BluetoothServiceInfoBleak, last_poll: float | None
@@ -98,6 +128,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         coordinator=coordinator,
         device_data=data,
         debug_recorder=debug_recorder,
+        measurement_store=measurement_store,
     )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(
@@ -110,7 +141,143 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Unload a config entry."""
     platforms = DEBUG_PLATFORMS if entry.data.get(CONF_DEBUG_ONLY) else PLATFORMS
-    return await hass.config_entries.async_unload_platforms(entry, platforms)
+    unloaded = await hass.config_entries.async_unload_platforms(entry, platforms)
+    if unloaded:
+        hass.data.get(DOMAIN, {}).get(DATA_MEASUREMENT_STORES, {}).pop(
+            entry.entry_id,
+            None,
+        )
+    return unloaded
+
+
+def _async_register_measurement_services(hass: HomeAssistant) -> None:
+    """Register measurement-management services once."""
+    domain_data = hass.data.setdefault(DOMAIN, {})
+    if domain_data.get(DATA_SERVICES_REGISTERED):
+        return
+
+    domain_data[DATA_SERVICES_REGISTERED] = True
+
+    def _get_store(call) -> OKOKScaleMeasurementStore:
+        stores = hass.data[DOMAIN][DATA_MEASUREMENT_STORES]
+        entry_id = call.data.get("entry_id")
+        if entry_id:
+            if entry_id not in stores:
+                raise HomeAssistantError(
+                    f"No MAXXMEE measurement store for entry_id {entry_id}"
+                )
+            return stores[entry_id]
+        if len(stores) == 1:
+            return next(iter(stores.values()))
+        raise HomeAssistantError("entry_id is required when multiple scales exist")
+
+    async def _add_user(call) -> None:
+        await _get_store(call).async_add_user(call.data["name"])
+
+    async def _rename_user(call) -> None:
+        store = _get_store(call)
+        user = await store.async_rename_user(
+            call.data["user_id"],
+            call.data["name"],
+        )
+        if user is None:
+            raise HomeAssistantError(f'Unknown user_id {call.data["user_id"]}')
+
+    async def _add_measurement(call) -> None:
+        store = _get_store(call)
+        user_id = call.data.get("user_id")
+        if user_id and not store.user_exists(user_id):
+            raise HomeAssistantError(f"Unknown user_id {user_id}")
+        await store.async_record_measurement(
+            weight_kg=call.data["weight_kg"],
+            measured_at=call.data.get("measured_at"),
+            user_id=user_id,
+            source="manual",
+        )
+
+    async def _update_measurement(call) -> None:
+        store = _get_store(call)
+        user_id = call.data.get("user_id")
+        if user_id and not store.user_exists(user_id):
+            raise HomeAssistantError(f"Unknown user_id {user_id}")
+        measurement = await store.async_update_measurement(
+            measurement_id=call.data["measurement_id"],
+            weight_kg=call.data.get("weight_kg"),
+            user_id=user_id,
+            measured_at=call.data.get("measured_at"),
+        )
+        if measurement is None:
+            raise HomeAssistantError(
+                f'Unknown measurement_id {call.data["measurement_id"]}'
+            )
+
+    async def _delete_measurement(call) -> None:
+        store = _get_store(call)
+        measurement = await store.async_delete_measurement(
+            call.data["measurement_id"]
+        )
+        if measurement is None:
+            raise HomeAssistantError(
+                f'Unknown measurement_id {call.data["measurement_id"]}'
+            )
+
+    entry_field = vol.Optional("entry_id")
+    hass.services.async_register(
+        DOMAIN,
+        "add_user",
+        _add_user,
+        schema=vol.Schema({entry_field: str, vol.Required("name"): str}),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "rename_user",
+        _rename_user,
+        schema=vol.Schema(
+            {
+                entry_field: str,
+                vol.Required("user_id"): str,
+                vol.Required("name"): str,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "add_measurement",
+        _add_measurement,
+        schema=vol.Schema(
+            {
+                entry_field: str,
+                vol.Required("weight_kg"): vol.Coerce(float),
+                vol.Optional("user_id"): str,
+                vol.Optional("measured_at"): str,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "update_measurement",
+        _update_measurement,
+        schema=vol.Schema(
+            {
+                entry_field: str,
+                vol.Required("measurement_id"): str,
+                vol.Optional("weight_kg"): vol.Coerce(float),
+                vol.Optional("user_id"): str,
+                vol.Optional("measured_at"): str,
+            }
+        ),
+    )
+    hass.services.async_register(
+        DOMAIN,
+        "delete_measurement",
+        _delete_measurement,
+        schema=vol.Schema(
+            {
+                entry_field: str,
+                vol.Required("measurement_id"): str,
+            }
+        ),
+    )
 
 
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
