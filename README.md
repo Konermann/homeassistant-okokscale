@@ -124,8 +124,9 @@ links to:
 - `summary.json`
 - `protocol.jsonl`
 
-The files are written below `/config/www/okokscale_debug/` and are available in
-the UI under `/local/okokscale_debug/...`.
+The files are written below `/config/okokscale_debug/` and are served by the
+integration under `/api/okokscale_debug/<run>/...`. The persistent notification
+contains direct links to the generated files.
 
 ## Local Mac BLE Debug Protocol
 

@@ -25,6 +25,7 @@ from .parser import (
 DEBUG_CAPTURE_SECONDS = 120
 DEBUG_DIRECTORY = "okokscale_debug"
 DEBUG_NOTIFICATION_ID = "okokscale_debug_protocol"
+DEBUG_URL_PATH = "/api/okokscale_debug"
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -104,6 +105,7 @@ def classify_manufacturer_data(
                     "status_hex": f"0x{reading.status:02x}",
                     "weight_kg": reading.weight,
                     "raw_weight": reading.raw_weight,
+                    "weight_source": reading.weight_source,
                 }
             )
             continue
@@ -211,6 +213,7 @@ class DeviceStats:
     manufacturer_values: Counter = field(default_factory=Counter)
     service_values: Counter = field(default_factory=Counter)
     classifications: Counter = field(default_factory=Counter)
+    classification_samples: list[dict[str, Any]] = field(default_factory=list)
     first_seen: str | None = None
     last_seen: str | None = None
     advertisement_count: int = 0
@@ -239,6 +242,8 @@ class DeviceStats:
             self.service_values[value] += 1
         for entry in event.get("classifications", []):
             self.classifications[entry["type"]] += 1
+            if len(self.classification_samples) < 10:
+                self.classification_samples.append(dict(entry))
 
     def as_dict(self) -> dict[str, Any]:
         """Return JSON-serializable aggregate stats."""
@@ -266,6 +271,7 @@ class DeviceStats:
             "manufacturer_values": dict(self.manufacturer_values.most_common()),
             "service_values": dict(self.service_values.most_common()),
             "classifications": dict(self.classifications.most_common()),
+            "classification_samples": self.classification_samples,
         }
 
 
@@ -402,6 +408,9 @@ def render_markdown_report(summary: Mapping[str, Any]) -> str:
         manufacturer_json = json.dumps(
             device["manufacturer_values"], sort_keys=True
         )
+        sample_json = json.dumps(
+            device["classification_samples"], sort_keys=True
+        )
         lines.extend(
             [
                 f"### `{device['address']}`",
@@ -415,6 +424,7 @@ def render_markdown_report(summary: Mapping[str, Any]) -> str:
                 f"- RSSI min/max/avg/last: {rssi_summary}",
                 f"- Connectable values: `{connectable_json}`",
                 f"- Classifications: `{classifications_json}`",
+                f"- Classification samples: `{sample_json}`",
                 f"- Manufacturer values: `{manufacturer_json}`",
                 "",
             ]
@@ -440,6 +450,35 @@ def write_debug_files(output_dir: Path, records: list[dict[str, Any]]) -> None:
     (output_dir / "report.md").write_text(report, encoding="utf-8")
 
 
+async def async_register_debug_static_path(
+    hass: Any,
+    run_id: str,
+    output_dir: Path,
+) -> str | None:
+    """Register a Home Assistant static path for one debug run."""
+    try:
+        from homeassistant.components.http import (
+            StaticPathConfig,
+            async_register_static_paths,
+        )
+    except ImportError:  # pragma: no cover - HA version compatibility
+        return None
+
+    try:
+        url_path = f"{DEBUG_URL_PATH}/{run_id}"
+        result = async_register_static_paths(
+            hass,
+            [StaticPathConfig(url_path, str(output_dir), False)],
+        )
+        if asyncio.iscoroutine(result):
+            await result
+    except Exception:  # pragma: no cover - defensive HA integration path
+        _LOGGER.exception("Failed to register OKOK Scale debug static path")
+        return None
+
+    return url_path
+
+
 def build_notification_message(summary: Mapping[str, Any], base_url: str) -> str:
     """Build a persistent notification message for a completed protocol."""
     known_devices = [
@@ -455,7 +494,7 @@ def build_notification_message(summary: Mapping[str, Any], base_url: str) -> str
         scale_summary = "No known OKOK/MAXXMEE packets were detected."
 
     return (
-        "OKOK Scale BLE debug protocol finished.\n\n"
+        "MAXXMEE BLE debug protocol finished.\n\n"
         f"{scale_summary}\n\n"
         f"- [Report]({base_url}/report.md)\n"
         f"- [Summary JSON]({base_url}/summary.json)\n"
@@ -565,13 +604,25 @@ class OKOKScaleDebugRecorder:
             )
 
             run_id = datetime.now().strftime("ble-debug-%Y%m%d-%H%M%S")
-            output_dir = Path(hass.config.path("www", DEBUG_DIRECTORY, run_id))
+            output_dir = Path(hass.config.path(DEBUG_DIRECTORY, run_id))
             await hass.async_add_executor_job(write_debug_files, output_dir, records)
+            base_url = await async_register_debug_static_path(
+                hass,
+                run_id,
+                output_dir,
+            )
+            if base_url is None:
+                output_dir = Path(hass.config.path("www", DEBUG_DIRECTORY, run_id))
+                await hass.async_add_executor_job(
+                    write_debug_files,
+                    output_dir,
+                    records,
+                )
+                base_url = f"/local/{DEBUG_DIRECTORY}/{run_id}"
 
             summary = summarize_records(records)
             self.latest_device_count = summary["device_count"]
             self.latest_advertisement_count = summary["advertisement_count"]
-            base_url = f"/local/{DEBUG_DIRECTORY}/{run_id}"
             self.latest_report_url = f"{base_url}/report.md"
             self.latest_summary_url = f"{base_url}/summary.json"
             self.latest_protocol_url = f"{base_url}/protocol.jsonl"
@@ -579,7 +630,7 @@ class OKOKScaleDebugRecorder:
             persistent_notification.async_create(
                 hass,
                 build_notification_message(summary, base_url),
-                title="OKOK Scale BLE debug protocol",
+                title="MAXXMEE BLE debug protocol",
                 notification_id=DEBUG_NOTIFICATION_ID,
             )
         except asyncio.CancelledError:

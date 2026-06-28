@@ -17,10 +17,15 @@ MAXXMEE_C0_MARKER = b"\x00\x02"
 MAXXMEE_C0_TRAILER = bytes.fromhex("D914000098FE")
 MAXXMEE_C0_WEIGHT_START = 2
 MAXXMEE_C0_WEIGHT_END = 4
+MAXXMEE_C0_ALT_WEIGHT_START = 4
+MAXXMEE_C0_ALT_WEIGHT_END = 6
 MAXXMEE_C0_MARKER_START = 6
 MAXXMEE_C0_MARKER_END = 8
 MAXXMEE_C0_STATUS = 8
 MAXXMEE_C0_TRAILER_START = 9
+MAXXMEE_C0_ALT_WEIGHT_PRIMARY_MAX = 3000
+MAXXMEE_C0_ALT_WEIGHT_MIN = 3000
+MAXXMEE_C0_ALT_WEIGHT_MAX = 25000
 
 VC0_PAYLOAD_LENGTH = 13
 VC0_WEIGHT_START = 0
@@ -37,6 +42,7 @@ class ScaleReading:
     final: bool
     raw_weight: int
     status: int
+    weight_source: str = "primary"
 
 
 def is_c0_manufacturer_id(manufacturer_id: int) -> bool:
@@ -81,9 +87,23 @@ def decode_maxxmee_c0_raw_value(raw_value: bytes) -> ScaleReading | None:
     if raw_value[MAXXMEE_C0_TRAILER_START:] != MAXXMEE_C0_TRAILER:
         return None
 
-    raw_weight = int.from_bytes(
+    primary_raw_weight = int.from_bytes(
         raw_value[MAXXMEE_C0_WEIGHT_START:MAXXMEE_C0_WEIGHT_END], "big"
     )
+    alternate_raw_weight = int.from_bytes(
+        raw_value[MAXXMEE_C0_ALT_WEIGHT_START:MAXXMEE_C0_ALT_WEIGHT_END], "big"
+    )
+    raw_weight = primary_raw_weight
+    weight_source = "primary"
+    if (
+        primary_raw_weight < MAXXMEE_C0_ALT_WEIGHT_PRIMARY_MAX
+        and MAXXMEE_C0_ALT_WEIGHT_MIN
+        <= alternate_raw_weight
+        <= MAXXMEE_C0_ALT_WEIGHT_MAX
+    ):
+        raw_weight = alternate_raw_weight
+        weight_source = "alternate"
+
     if raw_weight == 0:
         return None
 
@@ -94,6 +114,7 @@ def decode_maxxmee_c0_raw_value(raw_value: bytes) -> ScaleReading | None:
         final=bool(status & 0x01),
         raw_weight=raw_weight,
         status=status,
+        weight_source=weight_source,
     )
 
 

@@ -53,7 +53,28 @@ class MaxxmeeC0ParserTest(unittest.TestCase):
                 self.assertTrue(reading.final)
                 self.assertEqual(reading.status, 0x25)
                 self.assertEqual(reading.raw_weight, 7890)
+                self.assertEqual(reading.weight_source, "primary")
                 self.assertAlmostEqual(reading.weight, 78.90)
+
+    def test_alternate_weight_offset_decodes_second_maxxmee_variant(self) -> None:
+        raw_values = (
+            (bytes.fromhex("C0EC064A1E8C000225D914000098FE"), 78.20),
+            (bytes.fromhex("C0EC064A2080000225D914000098FE"), 83.20),
+        )
+
+        for raw_value, expected_weight in raw_values:
+            with self.subTest(raw_value=raw_value.hex()):
+                reading = parser.decode_maxxmee_c0_raw_value(raw_value)
+
+                self.assertIsNotNone(reading)
+                self.assertTrue(reading.final)
+                self.assertEqual(reading.status, 0x25)
+                self.assertEqual(reading.weight_source, "alternate")
+                self.assertAlmostEqual(reading.weight, expected_weight)
+                self.assertAlmostEqual(
+                    parser.parse_maxxmee_c0_raw_value(raw_value),
+                    expected_weight,
+                )
 
     def test_home_assistant_manufacturer_payload_rebuilds_raw_value(self) -> None:
         raw_value = bytes.fromhex("C0EC1ED21392000225D914000098FE")

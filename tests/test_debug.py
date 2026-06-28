@@ -75,6 +75,7 @@ class HADebugProtocolTest(unittest.TestCase):
         self.assertEqual(event["service_uuids"], DummyServiceInfo.service_uuids)
         self.assertEqual(event["classifications"][0]["type"], "maxxmee_c0_weight")
         self.assertTrue(event["classifications"][0]["stable"])
+        self.assertEqual(event["classifications"][0]["weight_source"], "primary")
         self.assertAlmostEqual(event["classifications"][0]["weight_kg"], 78.30)
 
     def test_service_uuid_can_mark_target_match(self) -> None:
@@ -185,6 +186,7 @@ class HADebugProtocolTest(unittest.TestCase):
             self.assertTrue((output_dir / "summary.json").is_file())
             report = (output_dir / "report.md").read_text(encoding="utf-8")
             self.assertIn("maxxmee_c0_weight", report)
+            self.assertIn("classification samples", report.lower())
 
     def test_report_renders_connection_attempts(self) -> None:
         summary = {
