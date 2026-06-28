@@ -64,6 +64,38 @@ Or follow these instructions:
 New OKOK Scale devices will automatically be detected after the integration has been installed and
 Home Assistant is restarted. If your scale is not detected it's not supported by this integration.
 
+## Local BLE debug protocol
+
+For debugging a scale from a MacBook, this repository includes a standalone BLE
+capture helper. It scans continuously for 2 minutes by default and writes:
+
+- `protocol.jsonl`: every advertisement and connection attempt as timestamped JSON
+- `summary.json`: aggregated devices, RSSI values, payloads, and classifications
+- `report.md`: a human-readable protocol summary
+
+Install the local dependency and run a targeted capture:
+
+```bash
+python3 -m venv .venv-ble-debug
+source .venv-ble-debug/bin/activate
+python -m pip install bleak
+python scripts/ble_debug_protocol.py --target C0:8F:40:F4:36:48
+```
+
+The `--target` value can be a full address, part of a name, or a known payload
+such as `12025002`. When a target is given, the helper scans for 120 seconds and
+then tries one BLE connection to the best-matching device. To only record
+advertisements, add `--no-connect-check`.
+
+To probe connection attempts during the scan as well:
+
+```bash
+python scripts/ble_debug_protocol.py --target C0:8F:40:F4:36:48 --connect-during-scan
+```
+
+On macOS, allow Terminal or your editor Bluetooth access if prompted. The output
+is written to a timestamped folder below `ble_debug_protocols/`.
+
 ## Contribution and appreciation
 
 Do you enjoy using this Home Assistant integration? You can contribute or show your appreciation,
