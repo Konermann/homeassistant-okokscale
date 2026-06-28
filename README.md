@@ -1,70 +1,125 @@
-# Home Assistant integration for OKOK Scales
+# MAXXMEE BLE Scale for Home Assistant
 
-![Python][python-shield]
-[![GitHub Release][releases-shield]][releases]
-[![Licence][license-shield]][license]
-[![Maintainer][maintainer-shield]][maintainer]
-[![Home Assistant][homeassistant-shield]][homeassistant]
-[![HACS][hacs-shield]][hacs]  
-[![Github Sponsors][github-shield]][github]
-[![PayPal][paypal-shield]][paypal]
-[![BuyMeCoffee][buymecoffee-shield]][buymecoffee]
-[![Patreon][patreon-shield]][patreon]
+Home Assistant custom integration for a MAXXMEE Bluetooth body scale that
+broadcasts weight values in passive BLE advertisements.
 
-## Introduction
+This fork keeps the original OKOK/Chipsea scale support from upstream and adds
+support for the MAXXMEE advertisement-only C0 packet variant.
 
-Home Assistant integration to read Bluetooth scales which can be used with the *OKOK international*
-app and identify themselves on Bluetooth as *Chipsea-BLE*.
+## Origin
 
-## Features
+Original repository: [rrooggiieerr/homeassistant-okokscale](https://github.com/rrooggiieerr/homeassistant-okokscale)
 
-- Installation/Configuration through auto detection
-- Read weight and battery status
+This repository is a fork of the original **OKOK Scale** integration. The
+original integration was built for Bluetooth scales that work with the OKOK
+International app and often identify as Chipsea/OKOK devices.
 
-## Hardware
+This fork is intentionally named **MAXXMEE BLE Scale for Home Assistant** in the
+README and Home Assistant metadata because the fork-specific work is focused on
+the MAXXMEE scale variant. The Home Assistant domain remains `okokscale` so
+existing integration paths and entities stay compatible.
 
-## Supported scales
+## Vibecoded Status
 
-The following scale is known to work:
+The fork-specific MAXXMEE support and BLE debug tooling were developed in an
+AI-assisted, vibecoded workflow. Treat this fork as experimental: it is tested
+against captured packets and local helper tests, but it has not had the same
+real-world coverage as the original upstream integration.
 
-* Tristar WG-2440
+## Supported Scales
 
-Please let me know if your scale works with this Home Assistant integration so I can
-improve the overview of supported scales.
+Known supported or intentionally preserved variants:
+
+- MAXXMEE Bluetooth scale with passive C0 advertisements
+- OKOK/Chipsea variants supported by the original upstream integration
+- Tristar WG-2440, as listed by the original project
+
+The MAXXMEE scale observed for this fork appears with Bluetooth names such as
+`tzc` or sometimes no useful name. It may also emit a short Apple manufacturer
+presence packet from an address-like name such as `C0:8F:40:F4:36:48`.
+
+## MAXXMEE vs Original OKOK Behavior
+
+The important difference is that the MAXXMEE scale is passive advertisement
+only. It should not require pairing, and this integration should not need to
+connect to it for weight updates.
+
+For the MAXXMEE scale, weight comes from manufacturer data shaped like:
+
+```text
+C0 xx ww ww ii ii 00 02 ss D9 14 00 00 98 FE
+```
+
+- `ww ww` is the weight as big-endian centi-kg
+- `ss` is the status byte
+- status `0x25` is treated as stable/final
+- status `0x24` is treated as transient and ignored
+
+Example:
+
+```text
+C0 EC 1E D2 13 92 00 02 25 D9 14 00 00 98 FE
+      1E D2 = 7890 = 78.90 kg
+```
+
+Original OKOK/Chipsea variants may use different manufacturer IDs and some
+models can be connectable for extra data such as battery or impedance. The
+MAXXMEE fork does not expose impedance because the meaning of the candidate
+bytes has not been validated.
 
 ## Installation
 
-### HACS
+### HACS Custom Repository
 
-The recommended way to install this Home Assistant integration is by using [HACS][hacs].
-Click the following button to open the integration directly on the HACS integration page.
+Add this fork as a HACS custom repository:
 
-[![Install OKOK Scale from HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=rrooggiieerr&repository=homeassistant-okokscale&category=integration)
+```text
+https://github.com/Konermann/homeassistant-okokscale
+```
 
-Or follow these instructions:
+Use category **Integration**, install the integration, then restart Home
+Assistant.
 
-- Go to your **HACS** view in Home Assistant and then to **Integrations**
-- Open the **Custom repositories** menu
-- Add this repository URL to the **Custom repositories** and select
-**Integration** as the **Category**
-- Click **Add**
-- Close the **Custom repositories** menu
-- Select **+ Explore & download repositories** and search for *OKOK Scale*
-- Select **Download**
-- Restart Home Assistant
+### Manual Installation
 
-### Manually
+Copy `custom_components/okokscale` into the `custom_components` directory of
+your Home Assistant configuration, then restart Home Assistant.
 
-- Copy the `custom_components/okokscale` directory of this repository into the
-`config/custom_components/` directory of your Home Assistant installation
-- Restart Home Assistant
+## Usage
 
-## Adding a new OKOK Scale
+After restart, Home Assistant should discover supported Bluetooth scales. For
+the MAXXMEE scale, step on the scale or otherwise wake it so it broadcasts final
+stable packets.
 
-New OKOK Scale devices will automatically be detected after the integration has been installed and
-Home Assistant is restarted. If your scale is not detected it's not supported by this integration.
+Expected MAXXMEE behavior:
 
-## Local BLE debug protocol
+- no pairing
+- no GATT connection needed for weight
+- weight sensor updates from passive BLE advertisements
+- unstable packets are ignored until a stable packet arrives
+
+If auto-discovery does not appear, add the integration manually from Home
+Assistant. This fork checks both passive and connectable Bluetooth discovery
+caches because the MAXXMEE device can emit different advertisement shapes.
+
+## Home Assistant BLE Debug Protocol
+
+The integration adds a diagnostic button entity named **BLE debug protocol**.
+Press it from the device page to capture Bluetooth advertisements for 2 minutes
+from Home Assistant itself. The protocol also records one connection attempt for
+the best matching scale candidate.
+
+When the capture finishes, Home Assistant creates a persistent notification with
+links to:
+
+- `report.md`
+- `summary.json`
+- `protocol.jsonl`
+
+The files are written below `/config/www/okokscale_debug/` and are available in
+the UI under `/local/okokscale_debug/...`.
+
+## Local Mac BLE Debug Protocol
 
 For debugging a scale from a MacBook, this repository includes a standalone BLE
 capture helper. It scans continuously for 2 minutes by default and writes:
@@ -79,7 +134,7 @@ Install the local dependency and run a targeted capture:
 python3 -m venv .venv-ble-debug
 source .venv-ble-debug/bin/activate
 python -m pip install bleak
-python scripts/ble_debug_protocol.py --target C0:8F:40:F4:36:48
+python scripts/ble_debug_protocol.py --target tzc
 ```
 
 The `--target` value can be a full address, part of a name, a known payload such
@@ -107,77 +162,3 @@ files without rescanning:
 python scripts/ble_debug_protocol.py \
   --rebuild-protocol ble_debug_protocols/<run>/protocol.jsonl
 ```
-
-## Contribution and appreciation
-
-Do you enjoy using this Home Assistant integration? You can contribute or show your appreciation,
-in the following ways.
-
-### Contribute your language
-
-This integration comes with language support for most languages supported by Home Assistant. The
-language files are generated using Google Translate and may contain errors. If you spot a
-translation error you are welcome to suggest improvements.
-
-You can find the translation files in the `custom_components/okokscale/translations` directory. Create a
-pull request (preferred) or issue with your improvements.
-
-More on translating custom integrations can be found
-[here](https://developers.home-assistant.io/docs/internationalization/custom_integration/).
-
-### Star this integration
-
-Help other Home Assistant and OKOK Scale users find this integration by starring this GitHub page.
- Click **⭐ Star** on the top right of the GitHub page.
-
-## Support my work
-
-Please consider supporting my work through one of the following platforms, your contribution is
-greatly appreciated and keeps me motivated:
-
-[![GitHub Sponsors][github-shield]][github]
-[![PayPal][paypal-shield]][paypal]
-[![BuyMeCoffee][buymecoffee-shield]][buymecoffee]
-[![Patreon][patreon-shield]][patreon]
-
-### Home Assistant support
-
-[Let me answer your Home Assistant questions](https://buymeacoffee.com/rrooggiieerr/e/447353). During
-a 1 hour Q&A session I help you solve your Home Assistant related issues.
-
-What can be done in one hour:
-- Home Assistant walktrough, I explain you where is what in the Home Assistant UI
-- Install and configure a Home Assistant integration
-- Explain and create scenes
-- Explain and create a simple automations
-- Install a ZHA quirk, to make your unsupported Zigbee device work in Home Assistant
-
-What takes more time:
-- Depending on the severity I might be able to help you with recovering your crashed Home Assistant
-- Support for Home Assistant Integration developers
-
-### Hire me
-
-If you would like to have a Home Assistant integration developed for your product or are in need
-of a freelance Python developer for your project please contact me, you can find my email address
-on [my GitHub profile](https://github.com/rrooggiieerr).
-
-[python-shield]: https://img.shields.io/badge/python-3670A0?style=for-the-badge&logo=python&logoColor=ffdd54
-[releases]: https://github.com/rrooggiieerr/homeassistant-okokscale/releases
-[releases-shield]: https://img.shields.io/github/v/release/rrooggiieerr/homeassistant-okokscale?style=for-the-badge
-[license]: ./LICENSE
-[license-shield]: https://img.shields.io/github/license/rrooggiieerr/homeassistant-okokscale?style=for-the-badge
-[maintainer]: https://github.com/rrooggiieerr
-[maintainer-shield]: https://img.shields.io/badge/MAINTAINER-%40rrooggiieerr-41BDF5?style=for-the-badge
-[homeassistant]: https://www.home-assistant.io/
-[homeassistant-shield]: https://img.shields.io/badge/home%20assistant-%2341BDF5.svg?style=for-the-badge&logo=home-assistant&logoColor=white
-[hacs]: https://hacs.xyz/
-[hacs-shield]: https://img.shields.io/badge/HACS-Custom-41BDF5.svg?style=for-the-badge
-[paypal]: https://paypal.me/seekingtheedge
-[paypal-shield]: https://img.shields.io/badge/PayPal-00457C?style=for-the-badge&logo=paypal&logoColor=white
-[buymecoffee]: https://www.buymeacoffee.com/rrooggiieerr
-[buymecoffee-shield]: https://img.shields.io/badge/Buy%20Me%20a%20Coffee-ffdd00?style=for-the-badge&logo=buy-me-a-coffee&logoColor=black
-[github]: https://github.com/sponsors/rrooggiieerr
-[github-shield]: https://img.shields.io/badge/sponsor-30363D?style=for-the-badge&logo=GitHub-Sponsors&logoColor=#EA4AAA
-[patreon]: https://www.patreon.com/seekingtheedge/creators
-[patreon-shield]: https://img.shields.io/badge/Patreon-F96854?style=for-the-badge&logo=patreon&logoColor=white

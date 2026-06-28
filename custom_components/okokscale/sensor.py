@@ -28,6 +28,7 @@ from homeassistant.helpers.sensor import sensor_device_info_to_hass_device_info
 from .device import device_key_to_bluetooth_entity_key
 from .okokscale import SensorDeviceClass as OKOKScaleSensorDeviceClass
 from .okokscale import SensorUpdate, Units
+from .runtime import OKOKScaleRuntimeData
 
 # Coordinator is used to centralize the data updates
 PARALLEL_UPDATES = 0
@@ -123,7 +124,8 @@ async def async_setup_entry(
     async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up the OKOK Scale sensors."""
-    coordinator: PassiveBluetoothProcessorCoordinator = entry.runtime_data
+    runtime_data: OKOKScaleRuntimeData = entry.runtime_data
+    coordinator: PassiveBluetoothProcessorCoordinator = runtime_data.coordinator
     processor = PassiveBluetoothDataProcessor(sensor_update_to_bluetooth_data_update)
     entry.async_on_unload(
         processor.async_add_entities_listener(

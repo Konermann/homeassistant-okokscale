@@ -16,9 +16,11 @@ from homeassistant.const import Platform
 from homeassistant.core import CoreState, HomeAssistant, callback
 from homeassistant.helpers import entity_registry
 
+from .debug import OKOKScaleDebugRecorder
 from .okokscale import OKOKScaleBluetoothDeviceData
+from .runtime import OKOKScaleRuntimeData
 
-PLATFORMS: list[Platform] = [Platform.SENSOR]
+PLATFORMS: list[Platform] = [Platform.SENSOR, Platform.BUTTON]
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -78,7 +80,14 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         connectable=False,
     )
 
-    entry.runtime_data = coordinator
+    debug_recorder = OKOKScaleDebugRecorder()
+    entry.async_on_unload(debug_recorder.cancel)
+
+    entry.runtime_data = OKOKScaleRuntimeData(
+        coordinator=coordinator,
+        device_data=data,
+        debug_recorder=debug_recorder,
+    )
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     entry.async_on_unload(
         coordinator.async_start()

@@ -1,2 +1,37 @@
+# macOS
+.DS_Store
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
 /.venv-ble-debug/
-/ble_debug_protocols/
+
+# Local environment and editor files
+.env
+.env.*
+.vscode/
+.idea/
+
+# BLE debug output
+ble_debug_protocols/
+okokscale_debug/
+www/okokscale_debug/
+*.ble.jsonl
+*.ble.log
+
+# Home Assistant local/runtime files if this repo is used as a config checkout
+home-assistant.log*
+home-assistant_v2.db*
+*.log

@@ -82,15 +82,23 @@ class OKOKScaleConfigFlow(ConfigFlow, domain=DOMAIN):
             )
 
         current_addresses = self._async_current_ids(include_ignore=False)
-        for discovery_info in async_discovered_service_info(self.hass, False):
-            address = discovery_info.address
-            if address in current_addresses or address in self._discovered_devices:
-                continue
-            device = DeviceData()
-            if device.supported(discovery_info):
-                self._discovered_devices[address] = (
-                    device.title or device.get_device_name() or discovery_info.name
-                )
+        for connectable in (False, True):
+            for discovery_info in async_discovered_service_info(
+                self.hass, connectable
+            ):
+                address = discovery_info.address
+                if (
+                    address in current_addresses
+                    or address in self._discovered_devices
+                ):
+                    continue
+                device = DeviceData()
+                if device.supported(discovery_info):
+                    self._discovered_devices[address] = (
+                        device.title
+                        or device.get_device_name()
+                        or discovery_info.name
+                    )
 
         if not self._discovered_devices:
             return self.async_abort(reason="no_devices_found")
