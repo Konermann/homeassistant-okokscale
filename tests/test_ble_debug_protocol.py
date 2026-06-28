@@ -3,7 +3,10 @@
 from __future__ import annotations
 
 import importlib.util
+import contextlib
+import io
 import sys
+import tempfile
 import unittest
 from pathlib import Path
 
@@ -60,6 +63,12 @@ class BleDebugProtocolTest(unittest.TestCase):
             "manufacturer_data": ble_debug_protocol.manufacturer_entries(
                 {76: bytes.fromhex("12025002")}
             ),
+            "classifications": [
+                {
+                    "type": "maxxmee_presence",
+                    "contains_weight": False,
+                }
+            ],
         }
 
         self.assertTrue(
@@ -71,6 +80,92 @@ class BleDebugProtocolTest(unittest.TestCase):
         self.assertFalse(
             ble_debug_protocol.event_matches_targets(event, ["nope"])
         )
+        self.assertTrue(
+            ble_debug_protocol.event_matches_targets(event, ["maxxmee"])
+        )
+
+    def test_device_stats_summarizes_tx_power_values(self) -> None:
+        stats = ble_debug_protocol.DeviceStats("device-address")
+        stats.record(
+            {
+                "timestamp": "2026-06-28T08:57:11.511+00:00",
+                "target_match": False,
+                "name": "test",
+                "local_name": None,
+                "rssi": -70,
+                "tx_power": 12,
+                "connectable": True,
+                "manufacturer_data": [],
+                "service_data": [],
+                "classifications": [],
+            }
+        )
+
+        summary = stats.as_dict()
+
+        self.assertEqual(summary["tx_power_values"], {"12": 1})
+
+    def test_rebuild_protocol_writes_summary_and_report(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            protocol_path = Path(temp_dir) / "protocol.jsonl"
+            records = [
+                {
+                    "type": "session_start",
+                    "timestamp": "2026-06-28T08:57:03.447+00:00",
+                    "duration_seconds": 120,
+                    "targets": ["C0:8F:40:F4:36:48"],
+                    "connect_check": True,
+                    "connect_during_scan": False,
+                },
+                {
+                    "type": "advertisement",
+                    "timestamp": "2026-06-28T08:59:01.792+00:00",
+                    "address": "E137B2F1-0235-2E2A-29E5-B010F5499DB1",
+                    "name": "tzc",
+                    "local_name": "tzc",
+                    "rssi": -53,
+                    "tx_power": None,
+                    "connectable": None,
+                    "manufacturer_data": ble_debug_protocol.manufacturer_entries(
+                        {
+                            0x06C0: bytes.fromhex(
+                                "1e8c1392000225d914000098fe"
+                            )
+                        }
+                    ),
+                    "service_data": [],
+                    "classifications": [
+                        {
+                            "type": "maxxmee_c0_weight",
+                            "stable": True,
+                            "weight_kg": 78.2,
+                        }
+                    ],
+                    "target_match": False,
+                },
+                {
+                    "type": "session_end",
+                    "timestamp": "2026-06-28T08:59:03.449+00:00",
+                },
+            ]
+            protocol_path.write_text(
+                "\n".join(
+                    ble_debug_protocol.json.dumps(record) for record in records
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+
+            with contextlib.redirect_stdout(io.StringIO()):
+                result = ble_debug_protocol.rebuild_protocol(protocol_path)
+
+            self.assertEqual(result, 0)
+
+            summary_path = Path(temp_dir) / "summary.json"
+            report_path = Path(temp_dir) / "report.md"
+            self.assertTrue(summary_path.is_file())
+            self.assertTrue(report_path.is_file())
+            self.assertIn("maxxmee_c0_weight", report_path.read_text())
 
 
 if __name__ == "__main__":

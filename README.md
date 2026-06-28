@@ -82,19 +82,31 @@ python -m pip install bleak
 python scripts/ble_debug_protocol.py --target C0:8F:40:F4:36:48
 ```
 
-The `--target` value can be a full address, part of a name, or a known payload
-such as `12025002`. When a target is given, the helper scans for 120 seconds and
-then tries one BLE connection to the best-matching device. To only record
-advertisements, add `--no-connect-check`.
+The `--target` value can be a full address, part of a name, a known payload such
+as `12025002`, or a classification such as `maxxmee`. On macOS, CoreBluetooth
+usually hides the real BLE MAC address, so `--target tzc` or `--target maxxmee`
+is often more useful than a MAC address. When a target is given, the helper
+scans for 120 seconds and then tries one BLE connection to the best-matching
+device. To only record advertisements, add `--no-connect-check`.
 
 To probe connection attempts during the scan as well:
 
 ```bash
-python scripts/ble_debug_protocol.py --target C0:8F:40:F4:36:48 --connect-during-scan
+python scripts/ble_debug_protocol.py \
+  --target tzc \
+  --connect-during-scan
 ```
 
 On macOS, allow Terminal or your editor Bluetooth access if prompted. The output
 is written to a timestamped folder below `ble_debug_protocols/`.
+
+If a scan crashes after writing `protocol.jsonl`, rebuild the missing summary
+files without rescanning:
+
+```bash
+python scripts/ble_debug_protocol.py \
+  --rebuild-protocol ble_debug_protocols/<run>/protocol.jsonl
+```
 
 ## Contribution and appreciation
 

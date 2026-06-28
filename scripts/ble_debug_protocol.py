@@ -189,6 +189,8 @@ def event_matches_targets(event: Dict[str, Any], targets: Iterable[str]) -> bool
                 entry.get("ad_raw"),
             ]
         )
+    for entry in event.get("classifications", []):
+        searchable.extend(str(value) for value in entry.values())
     return any(text_matches_targets(value, target_list) for value in searchable)
 
 
@@ -200,7 +202,7 @@ class DeviceStats:
     names: Counter = field(default_factory=Counter)
     local_names: Counter = field(default_factory=Counter)
     rssi_values: List[int] = field(default_factory=list)
-    tx_power_values: List[int] = field(default_factory=list)
+    tx_power_values: Counter = field(default_factory=Counter)
     connectable_values: Counter = field(default_factory=Counter)
     manufacturer_values: Counter = field(default_factory=Counter)
     service_values: Counter = field(default_factory=Counter)
@@ -224,7 +226,7 @@ class DeviceStats:
         if isinstance(event.get("rssi"), int):
             self.rssi_values.append(event["rssi"])
         if isinstance(event.get("tx_power"), int):
-            self.tx_power_values.append(event["tx_power"])
+            self.tx_power_values[str(event["tx_power"])] += 1
         self.connectable_values[str(event.get("connectable"))] += 1
 
         for entry in event.get("manufacturer_data", []):
@@ -262,6 +264,7 @@ class DeviceStats:
             "manufacturer_values": dict(self.manufacturer_values.most_common()),
             "service_values": dict(self.service_values.most_common()),
             "classifications": dict(self.classifications.most_common()),
+            "known_scale": bool(self.classifications),
         }
 
 
@@ -280,6 +283,7 @@ class ProtocolRecorder:
         self.devices: Dict[str, DeviceStats] = {}
         self.device_objects: Dict[str, Any] = {}
         self.target_addresses: Counter = Counter()
+        self.known_scale_addresses: Counter = Counter()
         self.connection_attempts: List[Dict[str, Any]] = []
         self._protocol_file = protocol_path.open("w", encoding="utf-8")
 
@@ -326,6 +330,8 @@ class ProtocolRecorder:
         self.device_objects[address] = device
         if event["target_match"]:
             self.target_addresses[address] += 1
+        if event["classifications"]:
+            self.known_scale_addresses[address] += 1
 
     def record_connection_attempt(self, result: Dict[str, Any]) -> None:
         """Store one connection attempt result."""
@@ -334,9 +340,10 @@ class ProtocolRecorder:
 
     def best_target_device(self) -> Optional[Any]:
         """Return the most frequently seen target BLEDevice object."""
-        if not self.target_addresses:
+        addresses = self.target_addresses or self.known_scale_addresses
+        if not addresses:
             return None
-        address = self.target_addresses.most_common(1)[0][0]
+        address = addresses.most_common(1)[0][0]
         return self.device_objects.get(address)
 
     def summary(
@@ -350,6 +357,7 @@ class ProtocolRecorder:
         devices.sort(
             key=lambda item: (
                 not item["target_match"],
+                not item["known_scale"],
                 -item["advertisement_count"],
                 item["address"],
             )
@@ -534,6 +542,83 @@ async def run_scan(args: argparse.Namespace) -> int:
     return 0
 
 
+def rebuild_protocol(protocol_path: Path) -> int:
+    """Rebuild summary and report files from an existing protocol.jsonl."""
+    if not protocol_path.is_file():
+        print(f"Protocol file not found: {protocol_path}", file=sys.stderr)
+        return 2
+
+    devices: Dict[str, DeviceStats] = {}
+    connection_attempts: List[Dict[str, Any]] = []
+    start_record: Dict[str, Any] = {}
+    end_record: Dict[str, Any] = {}
+    advertisement_count = 0
+
+    with protocol_path.open("r", encoding="utf-8") as protocol_file:
+        for line_number, line in enumerate(protocol_file, start=1):
+            if not line.strip():
+                continue
+            try:
+                record = json.loads(line)
+            except json.JSONDecodeError as err:
+                print(
+                    f"Skipping invalid JSON on line {line_number}: {err}",
+                    file=sys.stderr,
+                )
+                continue
+
+            record_type = record.get("type")
+            if record_type == "session_start":
+                start_record = record
+            elif record_type == "session_end":
+                end_record = record
+            elif record_type == "connection_attempt":
+                connection_attempts.append(record)
+            elif record_type == "advertisement":
+                advertisement_count += 1
+                address = record.get("address") or "unknown"
+                devices.setdefault(address, DeviceStats(address)).record(record)
+
+    device_summaries = [stats.as_dict() for stats in devices.values()]
+    device_summaries.sort(
+        key=lambda item: (
+            not item["target_match"],
+            not item["known_scale"],
+            -item["advertisement_count"],
+            item["address"],
+        )
+    )
+
+    started_at = start_record.get("timestamp") or ""
+    finished_at = end_record.get("timestamp") or ""
+    summary = {
+        "started_at": started_at,
+        "finished_at": finished_at,
+        "duration_seconds": start_record.get("duration_seconds"),
+        "targets": start_record.get("targets", []),
+        "connect_check_enabled": bool(start_record.get("connect_check")),
+        "connect_during_scan": bool(start_record.get("connect_during_scan")),
+        "device_count": len(device_summaries),
+        "advertisement_count": advertisement_count,
+        "connection_attempts": connection_attempts,
+        "devices": device_summaries,
+        "rebuilt_from": str(protocol_path),
+    }
+
+    output_dir = protocol_path.parent
+    summary_path = output_dir / "summary.json"
+    report_path = output_dir / "report.md"
+    summary_path.write_text(
+        json.dumps(summary, indent=2, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    report_path.write_text(render_markdown_report(summary), encoding="utf-8")
+
+    print(f"Rebuilt Summary: {summary_path}")
+    print(f"Rebuilt Report:  {report_path}")
+    return 0
+
+
 def render_markdown_report(summary: Dict[str, Any]) -> str:
     """Render a human-readable protocol report."""
     lines = [
@@ -627,6 +712,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Scan duration in seconds. Default: 120.",
     )
     parser.add_argument(
+        "--rebuild-protocol",
+        help=(
+            "Rebuild summary.json and report.md from an existing protocol.jsonl "
+            "without scanning."
+        ),
+    )
+    parser.add_argument(
         "--output-dir",
         default="ble_debug_protocols",
         help="Directory where a timestamped protocol folder is created.",
@@ -671,6 +763,8 @@ def main(argv: Optional[List[str]] = None) -> int:
     """Command line entry point."""
     parser = build_arg_parser()
     args = parser.parse_args(argv)
+    if args.rebuild_protocol:
+        return rebuild_protocol(Path(args.rebuild_protocol))
     if args.duration <= 0:
         parser.error("--duration must be greater than 0")
     if args.connect_every <= 0:
