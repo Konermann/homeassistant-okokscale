@@ -67,6 +67,21 @@ class MaxxmeeC0ParserTest(unittest.TestCase):
         )
         self.assertAlmostEqual(parser.parse_maxxmee_c0_raw_value(raw_value), 78.90)
 
+    def test_short_presence_advertisement_is_not_weight_data(self) -> None:
+        manufacturer_data = {76: bytes.fromhex("12025002")}
+
+        self.assertTrue(
+            parser.is_maxxmee_presence_manufacturer_data(manufacturer_data)
+        )
+        self.assertIsNone(
+            parser.maxxmee_c0_raw_from_manufacturer_data(
+                76, manufacturer_data[76]
+            )
+        )
+        self.assertIsNone(
+            parser.decode_maxxmee_c0_raw_value(bytes.fromhex("4c0012025002"))
+        )
+
     def test_legacy_vc0_payload_decoder_still_parses_kg(self) -> None:
         payload = bytes.fromhex("1ED21392000225D914000098FE")
 

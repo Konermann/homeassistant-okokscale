@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 C0_MANUFACTURER_ID_LSB = 0xC0
+MAXXMEE_PRESENCE_MANUFACTURER_ID = 0x004C
+MAXXMEE_PRESENCE_PAYLOAD = bytes.fromhex("12025002")
 
 MASS_UNIT_KILOGRAMS = "kg"
 MASS_UNIT_POUNDS = "lb"
@@ -39,6 +42,16 @@ class ScaleReading:
 def is_c0_manufacturer_id(manufacturer_id: int) -> bool:
     """Return true if the manufacturer id has the VC0/C0 low byte."""
     return (manufacturer_id & 0xFF) == C0_MANUFACTURER_ID_LSB
+
+
+def is_maxxmee_presence_manufacturer_data(
+    manufacturer_data: Mapping[int, bytes],
+) -> bool:
+    """Return true for the short MAXXMEE presence advertisement."""
+    return (
+        manufacturer_data.get(MAXXMEE_PRESENCE_MANUFACTURER_ID)
+        == MAXXMEE_PRESENCE_PAYLOAD
+    )
 
 
 def maxxmee_c0_raw_from_manufacturer_data(

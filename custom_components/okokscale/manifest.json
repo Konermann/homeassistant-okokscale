@@ -14,6 +14,11 @@
     	"manufacturer_id": 8394
     },
     {
+    	"manufacturer_data_start": [18, 2, 80, 2],
+    	"manufacturer_id": 76,
+    	"local_name": "C0:*"
+    },
+    {
     	"connectable": false,
     	"local_name": "tzc*"
     },

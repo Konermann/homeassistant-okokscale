@@ -20,6 +20,7 @@ from .parser import (
     decode_maxxmee_c0_raw_value,
     decode_vc0_payload,
     is_c0_manufacturer_id,
+    is_maxxmee_presence_manufacturer_data,
     maxxmee_c0_raw_from_manufacturer_data,
 )
 
@@ -93,7 +94,11 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
         if _LOGGER.isEnabledFor(logging.DEBUG):
             self.log_service_info(service_info)
 
-        if not self._has_supported_manufacturer_data(service_info.manufacturer_data):
+        has_supported_data = self._has_supported_manufacturer_data(
+            service_info.manufacturer_data
+        )
+        has_maxxmee_presence = self._is_maxxmee_presence_advertisement(service_info)
+        if not has_supported_data and not has_maxxmee_presence:
             _LOGGER.info(
                 "Manufacturer data not found for %s; ids=%s",
                 service_info.address,
@@ -109,9 +114,27 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
         self.set_device_name(self.name)
         self.set_title(self.name)
 
+        if has_maxxmee_presence and not has_supported_data:
+            _LOGGER.debug(
+                "MAXXMEE presence advertisement for %s contains no weight data",
+                service_info.address,
+            )
+
         self.process_manufacturer_data(service_info.manufacturer_data)
 
         self.update_signal_strength(service_info.rssi)
+
+    def _is_maxxmee_presence_advertisement(
+        self, service_info: BluetoothServiceInfo
+    ) -> bool:
+        """Return true for the short discovery advertisement seen on MAXXMEE."""
+        address = service_info.address.upper()
+        name = (service_info.name or "").upper()
+        return (
+            name == address
+            and address.startswith("C0:")
+            and is_maxxmee_presence_manufacturer_data(service_info.manufacturer_data)
+        )
 
     def _has_supported_manufacturer_data(self, manufacturer_data) -> bool:
         """Return true if the advertisement contains a supported packet."""
@@ -137,6 +160,16 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
 
         return False
 
+    def _has_maxxmee_c0_manufacturer_data(self, manufacturer_data) -> bool:
+        """Return true if the advertisement contains MAXXMEE C0 data."""
+        for manufacturer_id, payload in manufacturer_data.items():
+            raw_value = maxxmee_c0_raw_from_manufacturer_data(
+                manufacturer_id, payload
+            )
+            if raw_value is not None and decode_maxxmee_c0_raw_value(raw_value):
+                return True
+        return False
+
     def poll_needed(
         self, service_info: BluetoothServiceInfo, last_poll: float | None
     ) -> bool:
@@ -144,6 +177,10 @@ class OKOKScaleBluetoothDeviceData(BluetoothData):
         This is called every time we get a service_info for a device. It means the
         device is working and online.
         """
+        if self._is_maxxmee_presence_advertisement(
+            service_info
+        ) or self._has_maxxmee_c0_manufacturer_data(service_info.manufacturer_data):
+            return False
         if last_poll is None or self.supports_impedance:
             return True
         return last_poll > UPDATE_INTERVAL_SECONDS
