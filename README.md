@@ -153,7 +153,7 @@ Each user gets graphable sensors for:
 These are ordinary Home Assistant sensors, so their history can be shown in
 Lovelace history/statistics graphs.
 
-## Weight Events and Apple Health Shortcuts
+## Apple Health via iOS Shortcuts
 
 Every stored measurement fires the Home Assistant event:
 
@@ -162,25 +162,103 @@ okokscale_weight_recorded
 ```
 
 The event data includes `user_id`, `user_name`, `weight_kg`, `measured_at`,
-`measurement_id`, and `apple_health_shortcut_text`. You can subscribe to a
-person's measurements with a Home Assistant automation filtered by `user_id`,
-then send a mobile notification or call an iOS Shortcut that writes the value to
-Apple Health.
+`measurement_id`, and `apple_health_shortcut_text`.
 
-Example automation trigger:
+`apple_health_shortcut_text` is formatted as:
+
+```text
+Name;78.35;2026-06-28T23:58:08+02:00
+```
+
+Home Assistant can send this text to an iPhone notification action. Tapping that
+action opens an iOS Shortcut, and the Shortcut writes the weight sample to Apple
+Health.
+
+Apple Health is personal to the iPhone/Apple ID. Send a user's weight event only
+to that user's phone, otherwise the weight will be imported into the wrong
+Health profile.
+
+### 1. Create the iOS Shortcut
+
+Create an iOS Shortcut named:
+
+```text
+OKOK Weight to Health
+```
+
+If you use a different name, also change the URL in the Home Assistant
+automation below.
+
+The Shortcut should do this:
+
+1. Receive **Text** from **Apps and 18 more**.
+2. If there is no input: **Ask For Text**.
+3. Get text from **Shortcut Input**.
+4. Split text by custom separator `;`.
+5. Get item at index `2` from **Split Text**. This is the weight.
+6. Replace `.` with `,` in the weight text on German/European iPhones.
+7. Convert the replaced weight text to **Number**.
+8. Get item at index `3` from **Split Text**. This is the timestamp.
+9. Get dates from the timestamp text.
+10. Log Health Sample:
+    - Type: **Weight**
+    - Value: the converted number
+    - Unit: `kg`
+    - Date: the parsed date
+
+On the first real run, iOS should ask whether Shortcuts may write data to
+Health. Allow it.
+
+### 2. Create the Home Assistant Automation
+
+Example:
 
 ```yaml
-trigger:
-  - platform: event
+alias: Add OKOK weight to Apple Health
+triggers:
+  - trigger: event
     event_type: okokscale_weight_recorded
     event_data:
       user_id: person_1
-action:
-  - service: notify.mobile_app_your_iphone
+actions:
+  - action: notify.mobile_app_your_iphone
     data:
-      title: "New weight"
+      title: New weight
       message: "{{ trigger.event.data.apple_health_shortcut_text }}"
+      data:
+        actions:
+          - action: URI
+            title: Add to Apple Health
+            activationMode: foreground
+            uri: "shortcuts://run-shortcut?name=OKOK%20Weight%20to%20Health&input=text&text={{ trigger.event.data.apple_health_shortcut_text | urlencode }}"
+mode: single
 ```
+
+Change these values:
+
+- `user_id: person_1`: use the `user_id` from the user's weight sensor
+  attributes.
+- `notify.mobile_app_your_iphone`: use the notify service for the target
+  iPhone, for example `notify.mobile_app_ich`. In Home Assistant, check
+  **Developer tools**, **Actions**, then search for `notify.mobile_app_`.
+- `OKOK%20Weight%20to%20Health`: this must match the Shortcut name. Spaces are
+  encoded as `%20`.
+
+Important: iOS does not let a Home Assistant notification silently write to
+Apple Health in the background. The notification appears first. Long-press or
+expand it, then tap **Add to Apple Health**.
+
+### 3. Test the Shortcut URL
+
+Open this URL in Safari on the iPhone:
+
+```text
+shortcuts://run-shortcut?name=OKOK%20Weight%20to%20Health&input=text&text=Henning%3B78.35%3B2026-06-28T23%3A58%3A08%2B02%3A00
+```
+
+If the Shortcut imports `78.35 kg` with the supplied date, the Shortcut is
+ready. If it imports `7835 kg`, add the **Replace Text** step from `.` to `,`
+before converting the weight to a number.
 
 ## Home Assistant BLE Debug Protocol
 
