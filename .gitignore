@@ -18,6 +18,10 @@ venv/
 env/
 /.venv-ble-debug/
 
+# Local Python/uv runtime pins
+.python-version
+uv.lock
+
 # Local environment and editor files
 .env
 .env.*
